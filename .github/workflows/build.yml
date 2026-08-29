@@ -108,10 +108,11 @@ jobs:
           filter: tree:0
           show-progress: false
 
-      # GitHub forks do not expose the upstream repository's tag refs. KOReader
-      # uses those tags to generate git-rev and validate version formatting.
-      - name: Fetch upstream tags
-        run: git fetch --force --tags https://github.com/koreader/koreader.git
+      # GitHub forks do not expose the upstream repository's tag refs. Fetch
+      # only our baseline tag: fetching every upstream tag can conflict with
+      # actions/checkout's partial-clone promisor remote on fork-only objects.
+      - name: Fetch upstream baseline tag
+        run: git fetch --force --no-tags https://github.com/koreader/koreader.git refs/tags/v2026.07.1:refs/tags/v2026.07.1
 
       - name: Fetch
         run: make fetchthirdparty
