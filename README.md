@@ -1,3 +1,18 @@
+# Paper Pro Reader
+
+Paper Pro Reader is a reading-first reMarkable Paper Pro application built on
+KOReader. This repository deliberately preserves KOReader as its rendering,
+document, input, and e-ink engine while product work is isolated above those
+subsystems. Phase 0 changes documentation and repository policy only; the
+application still builds and behaves as KOReader.
+
+This is a derivative work of KOReader and remains licensed under the GNU AGPL
+v3. See [NOTICE.md](NOTICE.md), [COPYING](COPYING), and the
+[architecture documentation](docs/ARCHITECTURE.md). Upstream project
+documentation follows unchanged below.
+
+---
+
 [![KOReader](https://raw.githubusercontent.com/koreader/koreader.github.io/master/koreader-logo.png)](https://koreader.rocks)
 
 #### KOReader is a document viewer primarily aimed at e-ink readers.

@@ -1,0 +1,229 @@
+# Architecture
+
+## Baseline and intent
+
+This document describes KOReader `v2026.07.1` at commit
+`9192014d8bd82a91dc1012473be0f238dedfdb54`. Paper Pro Reader treats KOReader
+as the engine and places product behavior above the existing document,
+rendering, input, persistence, and e-ink infrastructure.
+
+The governing product rule is: reading remains visible whenever reasonably
+possible. Definitions, notes, vocabulary actions, and quick AI interactions
+belong in contextual overlays instead of unrelated full-screen flows.
+
+## Boot and document flow
+
+The verified high-level path is:
+
+```text
+reader.lua
+  -> FileManager or ReaderUI:showReader()
+  -> DocumentRegistry:openDocument()
+  -> CREngine, MuPDF/K2pdfopt, or another registered provider
+  -> ReaderUI modules
+  -> ReaderView:paintTo()
+  -> UIManager dirty/refresh queues
+  -> Screen / BlitBuffer / framebuffer implementation
+  -> QTFB bridge on the Paper Pro launch path
+  -> Gallery 3 display
+```
+
+`reader.lua` initializes the device and UIManager, then opens either a supplied
+document through `ReaderUI` or the `FileManager`. `ReaderUI:showReader()` is the
+safe document-opening entry point. It resolves a provider through
+`DocumentRegistry`, opens the document, creates the reader, and shows it through
+UIManager.
+
+`DocumentRegistry` registers `CreDocument`, `PdfDocument`, DjVu, image, and text
+providers. It consults DocSettings for per-document provider choices and keeps
+reference-counted document instances. FileManager delegates actual reading to
+ReaderUI rather than owning rendering.
+
+`ReaderUI:init()` composes the reader from modules. Relevant modules include
+ReaderView, ReaderHighlight, ReaderAnnotation, ReaderBookmark,
+ReaderDictionary, navigation/paging or rolling modules, search, TOC, settings,
+and plugins. ReaderView owns the visible document surface and paints the
+document, temporary/saved highlights, note markers, footer, and registered view
+modules.
+
+UIManager does not render documents itself. It tracks dirty widgets and refresh
+requests, combines intersecting refresh regions, promotes partial refreshes
+according to policy, calls widget `paintTo()` methods, and finally invokes the
+selected Screen refresh method. Product overlays must use these queues and
+bounded refresh regions rather than writing directly to the framebuffer.
+
+## Document providers
+
+### Reflowable documents
+
+`frontend/document/credocument.lua` adapts CREngine. For text selection it can
+return selected text, start/end XPointers, and screen-space boxes. It can map
+XPointers to pages and screen positions, retrieve text between XPointers, and
+extend an XPointer range to a sentence segment. These anchors remain stable
+across ordinary navigation but must still be treated as document-version
+specific.
+
+### Fixed-layout documents
+
+`frontend/document/pdfdocument.lua` delegates text, word, page-box,
+coordinate-transform, OCR, zoom, and reflow work to the K2pdfopt/MuPDF adapter
+in `koptinterface`. Selection data is page based and includes position records
+and screen/page boxes. Native sentence or paragraph boundaries are not as rich
+or reliable as CREngine's DOM-aware operations; ContextResolver must degrade to
+nearby words or page text instead of inventing semantic boundaries.
+
+## Selection, dictionary, and annotations
+
+ReaderHighlight receives hold/hold-pan/hold-release gestures. It converts the
+gesture's screen coordinate through ReaderView, calls the current document
+provider, and stores a selection table containing `text`, `pos0`, `pos1`, and
+provider-dependent `sboxes`/`pboxes`. Saved annotations add chapter, timestamp,
+drawer/color, note, and page information.
+
+For CREngine, `pos0` and `pos1` are XPointers. For PDF/fixed-layout documents,
+they include the page and page coordinates. ReaderView exposes
+`screenToPageTransform()` and `pageToScreenTransform()` and tracks visible
+highlight rectangles, which are the correct basis for contextual overlay
+placement.
+
+ReaderDictionary uses local StarDict data through `sdcv`. A lookup emits
+`WordLookedUp(word, book_title)` before result retrieval. Vocabulary Builder
+listens for this event and records the word, title, discovery/review times,
+surrounding context, highlighted selection, review count, and streak in
+`vocabulary_builder.sqlite3`.
+
+Known gaps at this baseline:
+
+- `WordLookedUp` does not include the chosen definition or final result set.
+- Vocabulary Builder does not persist definition, chapter, or a navigable
+  document anchor.
+- PDF sentence/paragraph inference is less capable than EPUB inference.
+- These gaps require narrow adapters or schema migrations later; they do not
+  justify replacing dictionary, annotation, or vocabulary storage.
+
+ReaderAnnotation loads and saves the `annotations` collection in the
+document's DocSettings sidecar. Reflowable annotations use XPointer positions;
+fixed-layout annotations use pages and coordinate ranges. ReaderBookmark is the
+existing browsing/editing surface for bookmarks, highlights, and notes and can
+navigate back to the stored passage. A future Notes Hub should adapt these
+records rather than create a second annotation authority.
+
+## Plugins and statistics
+
+PluginLoader discovers `.koplugin` packages and ReaderUI registers their
+instances as reader modules. Plugins receive ReaderUI events such as
+`ReaderReady`, `PageUpdate`, `PosUpdate`, `WordLookedUp`, and document closing.
+Vocabulary Builder and Statistics demonstrate reusable event-driven storage.
+They are adapters/integration points, not product composition roots.
+
+## Touch and Marker input
+
+On Paper Pro, `frontend/device/remarkable/device.lua` opens the buttons, hall
+sensor, Marker, and touch evdev nodes and scales their coordinates into the
+1620 x 2160 display coordinate space. Input normalizes kernel events into
+per-contact slots. At each synchronization frame it routes stylus slots through
+`Input:registerStylusCallback()` before passing remaining contacts to gesture
+detection. Generated Gesture events reach UIManager and then InputContainer
+touch zones and ReaderUI modules.
+
+The stable callback payload carries slot/contact identity, x/y coordinates,
+tool, and event time. It does not currently retain pressure values. Physical
+`evtest`-level verification is required before choosing the smallest adapter
+change for pressure; Phase 0 does not alter Input or the reMarkable device
+driver.
+
+## Product-owned layer
+
+Future product code belongs under `frontend/apps/paperpro/`:
+
+```text
+frontend/apps/paperpro/
+  paperproreaderui.lua       product composition root
+  adapters/                  narrow KOReader integration seams
+  services/                  selection, context, definitions, vocabulary,
+                             annotations, AI provider, and offline queue
+  overlays/                  shared overlay host and contextual panels
+  ink/                       stroke capture, persistence, and rasterization
+```
+
+This directory is a future ownership map, not a Phase 0 instruction to create
+empty modules. ReaderUI remains the working reader until a later vertical slice
+proves the product composition seam.
+
+## Future contracts
+
+These are conceptual Lua-table contracts. They deliberately do not prescribe a
+cloud vendor or a new database in Phase 0.
+
+### DocumentAnchor
+
+```text
+kind = "xpointer" | "fixed_page"
+document_id
+start / finish XPointers                    # xpointer
+page, pos0, pos1, page_boxes                # fixed_page
+```
+
+### SelectionSnapshot
+
+```text
+text, selected_word, before_context, after_context
+screen_boxes, page_boxes, anchor
+book_title, author, chapter
+```
+
+SelectionService normalizes ReaderHighlight/provider data without taking
+ownership of highlighting or selection rendering.
+
+### ReadingContext
+
+```text
+selection, sentence?, paragraph?, nearby_paragraphs?
+book_title, author, chapter?, anchor
+capabilities = { sentence, paragraph, precise_anchor }
+```
+
+Missing provider capabilities are explicit; callers must not confuse inferred
+PDF context with CREngine DOM context.
+
+### ReaderOverlay
+
+```text
+open(model, anchor_boxes)
+update(model)
+dismiss()
+getCoverageBounds()
+getRefreshRegion()
+```
+
+All overlays preserve the reading position, choose above/below/side placement
+from available space, are touch/Marker friendly, and request only the necessary
+UIManager repaint region. Quick Ask is the default future AI state; expanded
+conversation and full study are explicit transitions.
+
+### InkStroke
+
+```text
+id, tool, started_at, ended_at, coordinate_space, anchor?
+points = [{ x, y, timestamp, pressure? }]
+```
+
+Raw strokes are authoritative. A raster image is a derived artifact for
+recognition or AI input.
+
+### AIProvider and OfflineQueue
+
+```text
+AIProvider:isAvailable()
+AIProvider:submit(request, callbacks) -> request_id
+AIProvider:cancel(request_id)
+
+OfflineQueue:enqueue(request)
+OfflineQueue:markSending(id)
+OfflineQueue:markCompleted(id, response)
+OfflineQueue:markFailed(id, retry_metadata)
+```
+
+Requests contain a provider-neutral ReadingContext plus typed question input.
+The device talks to a secure backend; permanent provider secrets never reside
+in the application. Saved responses remain readable offline.
