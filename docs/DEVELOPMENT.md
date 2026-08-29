@@ -43,8 +43,10 @@ brew install ccache luacheck p7zip shellcheck shfmt
 
 On the Phase 0 host, Homebrew installation required an administrator-password
 prompt unavailable to the automated session. See `BASELINE_TESTS.md` for the
-result; no successful local build is claimed until the documented toolchain is
-installed and the commands below pass.
+result. GitHub Actions built and tested an ARM64 app artifact, which was then
+run locally for focused smoke tests; that does not count as a source build from
+this checkout. No successful local source build is claimed until the documented
+toolchain is installed and the commands below pass.
 
 ## Dependencies, build, and run
 
