@@ -26,6 +26,7 @@ local LanguageSupport = require("languagesupport")
 local NetworkListener = require("ui/network/networklistener")
 local Notification = require("ui/widget/notification")
 local PluginLoader = require("pluginloader")
+local PaperProReader = require("apps/paperpro/paperproreader")
 local ReaderActivityIndicator = require("apps/reader/modules/readeractivityindicator")
 local ReaderAnnotation = require("apps/reader/modules/readerannotation")
 local ReaderBack = require("apps/reader/modules/readerback")
@@ -221,6 +222,12 @@ function ReaderUI:init()
         view = self.view,
         ui = self,
         document = self.document,
+    })
+    -- Paper Pro Reader product composition seam. This remains a ReaderUI
+    -- module so document, rendering, annotation, and dictionary ownership stay
+    -- with their existing KOReader modules.
+    self:registerModule("paperpro", PaperProReader:new{
+        ui = self,
     })
     -- wikipedia
     self:registerModule("wikipedia", ReaderWikipedia:new{

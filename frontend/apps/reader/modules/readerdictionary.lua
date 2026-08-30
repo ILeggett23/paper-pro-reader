@@ -835,6 +835,8 @@ function ReaderDictionary:showPreferredDictsDialog(touchmenu_instance)
     UIManager:show(dialog)
 end
 
+local tidyMarkup
+
 function ReaderDictionary:onLookupWord(word, is_sane, boxes, highlight, link, dict_close_callback)
     logger.dbg("dict lookup word:", word, boxes)
     -- escape quotes and other funny characters in word
@@ -856,6 +858,64 @@ function ReaderDictionary:onLookupWord(word, is_sane, boxes, highlight, link, di
     -- Wrapped through Trapper, as we may be using Trapper:dismissablePopen() in it
     Trapper:wrap(function()
         self:stardictLookup(word, self.enabled_dict_names, not disable_fuzzy_search, boxes, link, dict_close_callback)
+    end)
+    return true
+end
+
+-- Record a lookup once at the dictionary boundary so alternate dictionary UIs
+-- preserve lookup history and the WordLookedUp event consumed by Vocabulary
+-- Builder.
+function ReaderDictionary:_recordWordLookup(word)
+    local book_title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
+    self.ui:handleEvent(Event:new("WordLookedUp", word, book_title))
+    if not self.disable_lookup_history then
+        lookup_history:addTableItem("lookup_history", {
+            book_title = book_title,
+            time = os.time(),
+            word = word,
+        })
+    end
+end
+
+function ReaderDictionary:_filterDocumentDictionaries(dict_names)
+    if not (dict_names and self.doc_disabled_dicts) then
+        return dict_names
+    end
+    local filtered_names = {}
+    for _, name in ipairs(dict_names) do
+        if not self.doc_disabled_dicts[name] then
+            table.insert(filtered_names, name)
+        end
+    end
+    return filtered_names
+end
+
+-- Perform an existing local StarDict lookup without choosing a presentation
+-- widget. This is a generic adapter seam for contextual or accessibility UIs;
+-- the legacy DictQuickLookup path continues to use onLookupWord().
+function ReaderDictionary:lookupWordResults(word, is_sane, callback)
+    if type(callback) ~= "function" then
+        return false
+    end
+    word = self:cleanSelection(word, is_sane)
+    self:_recordWordLookup(word)
+
+    local dict_names = self:_filterDocumentDictionaries(self.enabled_dict_names)
+    if dict_names and #dict_names == 0 then
+        callback(word, {
+            {
+                dict = _("Not available"),
+                word = word,
+                definition = _("There are no enabled dictionaries.\nPlease check the 'Dictionary settings' menu."),
+                no_result = true,
+            }
+        })
+        return true
+    end
+
+    local disable_fuzzy_search = self.ui.doc_settings and self.disable_fuzzy_search or self.disable_fuzzy_search_fm
+    Trapper:wrap(function()
+        callback(word, tidyMarkup(self:startSdcv(word, dict_names, not disable_fuzzy_search)))
     end)
     return true
 end
@@ -1038,7 +1098,7 @@ local function getAvailableIfoByName(dictionary_name)
     return nil
 end
 
-local function tidyMarkup(results)
+tidyMarkup = function(results)
     local cdata_tag = "<!%[CDATA%[(.-)%]%]>"
     local format_escape = "&[29Ib%+]{(.-)}"
     for _, result in ipairs(results) do
@@ -1381,6 +1441,7 @@ function ReaderDictionary:startSdcv(word, dict_names, fuzzy_search)
                 dict = "",
                 word = word,
                 definition = _([[No dictionaries installed. Please search for "Dictionary support" in the KOReader Wiki to get more information about installing new dictionaries.]]),
+                no_dictionaries = true,
             }
         }
     else -- flatten any possible results
@@ -1423,17 +1484,7 @@ function ReaderDictionary:startSdcv(word, dict_names, fuzzy_search)
 end
 
 function ReaderDictionary:stardictLookup(word, dict_names, fuzzy_search, boxes, link, dict_close_callback)
-    local book_title = self.ui.doc_props and self.ui.doc_props.display_title or _("Dictionary lookup")
-
-    -- Event for plugin to catch lookup with book title
-    self.ui:handleEvent(Event:new("WordLookedUp", word, book_title))
-    if not self.disable_lookup_history then
-        lookup_history:addTableItem("lookup_history", {
-            book_title = book_title,
-            time = os.time(),
-            word = word,
-        })
-    end
+    self:_recordWordLookup(word)
 
     if Device:canExternalDictLookup() and G_reader_settings:isTrue("external_dict_lookup") then
         Device:doExternalDictLookup(word, G_reader_settings:readSetting("external_dict_lookup_method"), function()
@@ -1452,15 +1503,7 @@ function ReaderDictionary:stardictLookup(word, dict_names, fuzzy_search, boxes, 
     end
 
     -- Before starting the search, remove any dictionaries that were disabled for *this* book.
-    if dict_names and self.doc_disabled_dicts then
-        local filtered_names = {}
-        for _, name in ipairs(dict_names) do
-            if not self.doc_disabled_dicts[name] then
-                table.insert(filtered_names, name)
-            end
-        end
-        dict_names = filtered_names
-    end
+    dict_names = self:_filterDocumentDictionaries(dict_names)
 
     -- If the user disabled all the dictionaries, go away.
     if dict_names and #dict_names == 0 then

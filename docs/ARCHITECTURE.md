@@ -134,26 +134,34 @@ driver.
 
 ## Product-owned layer
 
-Future product code belongs under `frontend/apps/paperpro/`:
+Phase 1 establishes the first product-owned modules under
+`frontend/apps/paperpro/`:
 
 ```text
 frontend/apps/paperpro/
-  paperproreaderui.lua       product composition root
-  adapters/                  narrow KOReader integration seams
-  services/                  selection, context, definitions, vocabulary,
-                             annotations, AI provider, and offline queue
-  overlays/                  shared overlay host and contextual panels
-  ink/                       stroke capture, persistence, and rasterization
+  paperproreader.lua         ReaderUI-attached product composition root
+  services/
+    selectionservice.lua     immutable EPUB/PDF selection snapshots
+    definitionservice.lua    normalized local dictionary result models
+  overlays/
+    placement.lua            resolution-aware pure placement policy
+    readeroverlay.lua        reusable bounded widget host/lifecycle
+    contextualactions.lua    Highlight/Define/Note/disabled Ask AI surface
+    definitionoverlay.lua    loading/result/no-result/error definition panel
 ```
 
-This directory is a future ownership map, not a Phase 0 instruction to create
-empty modules. ReaderUI remains the working reader until a later vertical slice
-proves the product composition seam.
+ReaderUI remains the functional reader. It registers PaperProReader as one
+module after ReaderDictionary; PaperProReader composes product behavior without
+taking ownership of the document, selection rendering, annotations, or
+dictionary engine. Future adapters, vocabulary/annotation services, AI queue,
+and ink work remain unimplemented.
 
 ## Future contracts
 
-These are conceptual Lua-table contracts. They deliberately do not prescribe a
-cloud vendor or a new database in Phase 0.
+SelectionSnapshot, DocumentAnchor, ReaderOverlay, and the local definition model
+are implemented Lua-table contracts. ReadingContext, InkStroke, AIProvider, and
+OfflineQueue remain future contracts and do not prescribe a cloud vendor or a
+new database.
 
 ### DocumentAnchor
 

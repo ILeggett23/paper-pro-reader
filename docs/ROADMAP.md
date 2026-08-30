@@ -11,6 +11,9 @@ offline definition path using ReaderDictionary/StarDict while retaining
 Highlight and Note actions. Ask AI is represented only as a disabled future
 capability. No handwriting or network AI is included.
 
+Implementation status: complete on `phase-1-selection-overlay`, pending review
+and merge into `main`.
+
 ## Phase 2 — Vocabulary and contextual notes
 
 Adapt Vocabulary Builder and ReaderAnnotation to retain definitions, source

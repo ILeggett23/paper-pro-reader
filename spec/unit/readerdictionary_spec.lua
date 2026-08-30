@@ -59,4 +59,39 @@ describe("Readerdictionary module", function()
         end
         readerui.languagesupport.extraDictionaryFormCandidates:revert()
     end)
+    it("should return local results without choosing a presentation widget", function()
+        local original_start_sdcv = dictionary.startSdcv
+        local original_handle_event = readerui.handleEvent
+        local original_enabled_dict_names = dictionary.enabled_dict_names
+        local existing_window = dictionary.dict_window
+        local looked_up_word, looked_up_title, result_word, results
+        dictionary.startSdcv = function()
+            return {
+                { word = "test", dict = "Local test dictionary", definition = "A definition." },
+            }
+        end
+        dictionary.enabled_dict_names = { "Local test dictionary" }
+        readerui.handleEvent = function(this, event)
+            if event.handler == "onWordLookedUp" then
+                looked_up_word, looked_up_title = event.args[1], event.args[2]
+                return true
+            end
+            return original_handle_event(this, event)
+        end
+
+        dictionary:lookupWordResults("test", false, function(word, lookup_results)
+            result_word, results = word, lookup_results
+        end)
+        fastforward_ui_events()
+
+        assert.are.same("test", looked_up_word)
+        assert.are.same(readerui.doc_props.display_title, looked_up_title)
+        assert.are.same("test", result_word)
+        assert.are.same("A definition.", results[1].definition)
+        assert.is_equal(existing_window, dictionary.dict_window)
+
+        dictionary.startSdcv = original_start_sdcv
+        dictionary.enabled_dict_names = original_enabled_dict_names
+        readerui.handleEvent = original_handle_event
+    end)
 end)
