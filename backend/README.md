@@ -75,9 +75,11 @@ as an OpenAI API key.
 ## OpenAI provider
 
 `src/providers/openai.mjs` implements the provider interface with the OpenAI
-Responses API at `POST /v1/responses`. The adapter sends `store: false`, a
-reading-companion instruction, the user's question, and a separately labeled
-JSON block of untrusted quoted book context. It does not enable tools,
+Responses API at `POST /v1/responses`. The configured model must support image
+and text input for handwritten questions. The adapter sends `store: false`, a
+reading-companion instruction, the user's typed question or bounded
+handwriting image, and a separately labeled JSON block of untrusted quoted
+book context. It does not enable tools,
 function-calling, web search, streaming, or provider-side conversation history.
 
 The model is selected exclusively with `OPENAI_MODEL`; the device protocol and
@@ -85,11 +87,19 @@ saved response format are provider-neutral.
 
 ## Validation and privacy
 
-The backend rejects bodies over 65,536 bytes, questions over 1,024 UTF-8 bytes,
+The backend rejects bodies over 400,000 bytes, questions over 1,024 UTF-8 bytes,
 selected passages over 8,192 bytes, surrounding fields over their documented
-limits, total source text over 16,384 bytes, unsupported schemas, and non-text
+limits, total source text over 16,384 bytes, unsupported schemas, and unsupported
 question types. Device-local file identities and navigation anchors are
 rejected if transmitted.
+
+Handwriting accepts only canonical base64 `image/png` data, up to 262,144
+decoded bytes, 1,200 x 512, and 600,000 pixels. PNG signature, IHDR, dimensions,
+and actual/declared byte count are checked. Images are processed in memory,
+never fetched from client URLs, never written to server disk, and never logged.
+The one-pass response includes qualitative clear/uncertain/unreadable
+recognition, optional recognized question text, clarification state, and the
+answer.
 
 Ordinary logs contain request ID, status, duration, and stable error category.
 They do not contain full questions, book excerpts, answers, bearer tokens, or

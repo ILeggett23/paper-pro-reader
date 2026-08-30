@@ -14,6 +14,17 @@ function outputText(payload) {
   return pieces.join("\n").trim();
 }
 
+function recognitionResult(text) {
+  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  let value;
+  try { value = JSON.parse(cleaned); } catch { return null; }
+  if (!value || !["clear", "uncertain", "unreadable"].includes(value.recognition_status)
+      || typeof value.clarification_required !== "boolean"
+      || typeof value.answer !== "string" || !value.answer.trim()
+      || (value.recognized_question != null && typeof value.recognized_question !== "string")) return null;
+  return value;
+}
+
 export class OpenAIProvider {
   constructor({ apiKey, model, timeoutMs = 30_000, fetchImpl = globalThis.fetch }) {
     this.apiKey = apiKey;
@@ -54,10 +65,24 @@ export class OpenAIProvider {
         if (response.status >= 500) {
           throw new AppError("provider_unavailable", 503, "Provider is temporarily unavailable", true);
         }
+        if (request.question.type === "ink" && response.status === 400) {
+          throw new AppError("model_capability", 400,
+            "Configured model does not accept handwriting images", false);
+        }
         throw new AppError("provider_error", 502, "Provider rejected the request", false);
       }
       const answer = outputText(payload);
       if (!answer) throw new AppError("malformed_provider_response", 502, "Provider returned no text", true);
+      if (request.question.type === "ink") {
+        const recognition = recognitionResult(answer);
+        if (!recognition) throw new AppError("malformed_provider_response", 502,
+          "Provider returned invalid handwriting recognition", true);
+        return { responseId: payload.id, answer: recognition.answer,
+          recognizedQuestion: recognition.recognized_question,
+          recognitionStatus: recognition.recognition_status,
+          clarificationRequired: recognition.clarification_required,
+          model: payload.model ?? this.model };
+      }
       return { responseId: payload.id, answer, model: payload.model ?? this.model };
     } catch (error) {
       if (error instanceof AppError) throw error;
@@ -71,4 +96,4 @@ export class OpenAIProvider {
   }
 }
 
-export { outputText };
+export { outputText, recognitionResult };
