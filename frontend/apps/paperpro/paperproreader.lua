@@ -179,6 +179,19 @@ end
 function PaperProReader:_submitQuickAsk(question)
     local snapshot = self.current_snapshot
     if not snapshot then return false end
+    if not self.ai_settings:isEnabled() then
+        return self:_showQuickAsk{
+            state = "error", question = question, source_text = snapshot.text,
+            context_mode = self.ai_settings:getContextMode(),
+            message = self:_friendlyAIError("disabled"), retryable = false,
+        }
+    elseif not self.ai_provider:isConfigured() then
+        return self:_showQuickAsk{
+            state = "error", question = question, source_text = snapshot.text,
+            context_mode = self.ai_settings:getContextMode(),
+            message = self:_friendlyAIError("not_configured"), retryable = false,
+        }
+    end
     local context, context_err = self.context_resolver:resolve(self.ui, snapshot, {
         context_mode = self.ai_settings:getContextMode(),
     })
