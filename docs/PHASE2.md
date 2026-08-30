@@ -76,8 +76,9 @@ updated_time
 ```
 
 Review fields and the existing title relationship are unchanged. Explicit
-columns store XPointer data. KOReader's JSON module stores PDF positions and
-page boxes; no executable Lua serialization or `loadstring` is used.
+columns store XPointer data. KOReader's RapidJSON module stores PDF positions
+and page boxes with non-throwing malformed-input handling; no executable Lua
+serialization or `loadstring` is used.
 
 The rich-column migration runs inside `BEGIN IMMEDIATE`, checks existing
 columns before each `ALTER TABLE`, commits only after all additions succeed,

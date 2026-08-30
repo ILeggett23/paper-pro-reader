@@ -1,17 +1,15 @@
-local JSON = require("json")
-local decodeJSON = JSON.decode.getDecoder{ nothrow = true }
+local JSON = require("rapidjson")
 
 local AnchorCodec = {}
 
 local function encode(value)
     if value == nil then return nil end
-    local ok, result = pcall(JSON.encode, value)
-    return ok and result or nil
+    return JSON.encode(value)
 end
 
 local function decode(value)
     if not value or value == "" then return nil end
-    local result = decodeJSON(value)
+    local result = JSON.decode(value)
     return type(result) == "table" and result or nil
 end
 

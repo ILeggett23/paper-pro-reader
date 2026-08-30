@@ -1,7 +1,6 @@
 local AnchorCodec = require("apps/paperpro/services/anchorcodec")
 local Event = require("ui/event")
-local JSON = require("json")
-local decodeJSON = JSON.decode.getDecoder{ nothrow = true }
+local JSON = require("rapidjson")
 
 local VocabularyService = {}
 VocabularyService.__index = VocabularyService
@@ -32,11 +31,8 @@ function VocabularyService:recordDefinition(snapshot, model, callback)
         return false
     end
     local anchor = AnchorCodec.toColumns(snapshot.anchor)
-    local ok, definitions_json = pcall(JSON.encode, model.definitions)
-    local normalized_definitions
-    if ok then
-        normalized_definitions = decodeJSON(definitions_json)
-    end
+    local definitions_json = JSON.encode(model.definitions)
+    local normalized_definitions = definitions_json and JSON.decode(definitions_json) or nil
     local discovery_time = os.time()
     local entry = {
         word = snapshot.selected_word,
@@ -48,7 +44,7 @@ function VocabularyService:recordDefinition(snapshot, model, callback)
         highlight = snapshot.text, source_text = snapshot.text,
         definition = model.definitions[1].text,
         dictionary_source = model.definitions[1].dictionary_name,
-        definitions_json = ok and definitions_json or nil,
+        definitions_json = definitions_json,
         author = authorText(snapshot.author), chapter = snapshot.chapter,
         document_id = anchor.document_id,
         anchor_kind = anchor.anchor_kind, anchor_start = anchor.anchor_start,
@@ -72,7 +68,7 @@ function VocabularyService:decodeItem(item)
     if not item then return nil end
     item.anchor = AnchorCodec.fromColumns(item)
     if item.definitions_json then
-        local definitions = decodeJSON(item.definitions_json)
+        local definitions = JSON.decode(item.definitions_json)
         if type(definitions) == "table" then item.definitions = definitions end
     end
     return item
