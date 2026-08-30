@@ -35,8 +35,7 @@ Implement ContextResolver, secure-backend AIProvider, queued offline requests,
 saved-response reading, and the Quick Ask overlay. No permanent provider secret
 is stored on the device.
 
-Implementation status: complete on `phase-4-ai-context-offline`, pending
-review and merge into `main`.
+Implementation status: complete and merged into `main` by pull request #4.
 
 ## Phase 5 — Book Writes Back and study surfaces
 
@@ -44,7 +43,10 @@ Add handwritten-question recognition, text or handwriting-styled responses,
 expanded conversation/full-study states, and a complete library/study visual
 system using complete-line or completed-response e-ink updates.
 
-The only recommended next implementation phase is Phase 5. It may add typed or
-recognized handwritten question input and expanded study surfaces while
-retaining Phase 4 context, authentication, queue, response, and navigation
-contracts.
+Implementation status: complete on `phase-5-book-writes-back`, pending review
+and merge into `main`.
+
+The next phase should focus only on physical Paper Pro qualification and
+product polish: real Marker/refresh/latency evidence, shared backend
+idempotency if deployed at scale, and usability refinement. It should not add
+web search, tools, or a general chatbot.
