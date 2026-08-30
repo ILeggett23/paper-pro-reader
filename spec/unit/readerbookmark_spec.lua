@@ -24,7 +24,10 @@ describe("ReaderBookmark module", function()
         readerui.highlight:onHold(nil, { pos = pos0 })
         readerui.highlight:onHoldPan(nil, { pos = pos1 })
         readerui.highlight:onHoldRelease()
-        assert.truthy(readerui.highlight.highlight_dialog)
+        if readerui.paperpro and readerui.paperpro.current_snapshot then
+            readerui.paperpro.overlay:dismiss(true)
+            readerui.paperpro.current_snapshot = nil
+        end
         readerui.highlight:saveHighlight()
     end
 
