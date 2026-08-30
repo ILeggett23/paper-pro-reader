@@ -82,9 +82,10 @@ function InkCanvas:_paintStatus(bb, x, y)
     bb:paintRect(x + bounds.x, y + bounds.y, bounds.w, bounds.h, Blitbuffer.COLOR_WHITE)
     bb:paintBorder(x + bounds.x, y + bounds.y, bounds.w, bounds.h, 2, Blitbuffer.COLOR_BLACK)
     local widget = self:_statusWidget()
+    local size = widget:getSize()
     widget:paintTo(bb,
-        x + bounds.x + math.floor((bounds.w - widget:getWidth()) / 2),
-        y + bounds.y + math.floor((bounds.h - widget:getHeight()) / 2))
+        x + bounds.x + math.floor((bounds.w - size.w) / 2),
+        y + bounds.y + math.floor((bounds.h - size.h) / 2))
 end
 
 function InkCanvas:paintTo(bb, x, y)
