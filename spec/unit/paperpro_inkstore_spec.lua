@@ -92,6 +92,6 @@ describe("Paper Pro InkStore", function()
         local store = InkStore:new{ document_id = "book.pdf", candidate_dirs = { directory } }
         store:save({ stroke("one", 1) })
         assert.is_true(store:purge())
-        assert.is_false(util.fileExists(directory .. "/" .. InkStore.FILENAME))
+        assert.is_nil(util.fileExists(directory .. "/" .. InkStore.FILENAME))
     end)
 end)

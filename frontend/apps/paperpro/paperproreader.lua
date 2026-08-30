@@ -46,7 +46,7 @@ function PaperProReader:init()
         service = self.vocabulary_service,
     }
     if not self.ink_service then
-        local bounds = self.ui.dimen:copy()
+        local bounds = (self.ui.dimen or Screen:getSize()):copy()
         self.ink_renderer = InkRenderer:new{ width = math.max(2, Screen:scaleBySize(2)) }
         self.ink_canvas = InkCanvas:new{
             dimen = bounds,
