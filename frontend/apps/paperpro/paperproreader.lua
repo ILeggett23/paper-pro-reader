@@ -1,4 +1,10 @@
 local AnnotationService = require("apps/paperpro/services/annotationservice")
+local AIHistory = require("apps/paperpro/hubs/aihistory")
+local AIProvider = require("apps/paperpro/services/aiprovider")
+local AIRequest = require("apps/paperpro/services/airequest")
+local AISettings = require("apps/paperpro/services/aisettings")
+local AnchorNavigator = require("apps/paperpro/services/anchornavigator")
+local ContextResolver = require("apps/paperpro/services/contextresolver")
 local ContextualActions = require("apps/paperpro/overlays/contextualactions")
 local DefinitionOverlay = require("apps/paperpro/overlays/definitionoverlay")
 local DefinitionService = require("apps/paperpro/services/definitionservice")
@@ -13,8 +19,12 @@ local InkStore = require("apps/paperpro/ink/inkstore")
 local NoteOverlay = require("apps/paperpro/overlays/noteoverlay")
 local NotesHub = require("apps/paperpro/hubs/noteshub")
 local Notification = require("ui/widget/notification")
+local OfflineQueue = require("apps/paperpro/services/offlinequeue")
+local MultiInputDialog = require("ui/widget/multiinputdialog")
+local QuickAskOverlay = require("apps/paperpro/overlays/quickaskoverlay")
 local Rasterizer = require("apps/paperpro/ink/rasterizer")
 local ReaderOverlay = require("apps/paperpro/overlays/readeroverlay")
+local ResponseStore = require("apps/paperpro/services/responsestore")
 local SelectionService = require("apps/paperpro/services/selectionservice")
 local VocabularyHub = require("apps/paperpro/hubs/vocabularyhub")
 local VocabularyService = require("apps/paperpro/services/vocabularyservice")
@@ -44,6 +54,20 @@ function PaperProReader:init()
     }
     self.vocabulary_hub = self.vocabulary_hub or VocabularyHub:new{
         service = self.vocabulary_service,
+    }
+    self.ai_settings = self.ai_settings or AISettings:new()
+    self.context_resolver = self.context_resolver or ContextResolver:new()
+    self.response_store = self.response_store or ResponseStore:new()
+    self.offline_queue = self.offline_queue or OfflineQueue:new()
+    self.ai_provider = self.ai_provider or AIProvider:new{ settings = self.ai_settings }
+    self.anchor_navigator = self.anchor_navigator or AnchorNavigator:new{ ui = self.ui }
+    self.quick_ask_overlay = self.quick_ask_overlay or QuickAskOverlay:new()
+    self.ai_history = self.ai_history or AIHistory:new{
+        queue = self.offline_queue,
+        responses = self.response_store,
+        navigator = self.anchor_navigator,
+        on_cancel = function(request_id) self:_cancelAIRequest(request_id) end,
+        on_retry = function(request_id) self:_retryQueuedAIRequest(request_id) end,
     }
     if not self.ink_service then
         local bounds = (self.ui.dimen or Screen:getSize()):copy()
@@ -75,6 +99,17 @@ function PaperProReader:init()
         end,
     }
     self._lookup_sequence = 0
+    self.document_closed = false
+    self._ai_queue_listener = self.offline_queue:addListener(function(item)
+        self:_onAIQueueItem(item)
+    end)
+    if self.ai_settings:isEnabled() then
+        UIManager:nextTick(function()
+            if not self.document_closed then
+                self.offline_queue:processBatch(self.ai_provider, self.response_store)
+            end
+        end)
+    end
     self._reader_note_mark = self.ui.view and self.ui.view.highlight.note_mark
     if self.ui.menu then self.ui.menu:registerToMainMenu(self) end
 end
@@ -85,8 +120,170 @@ function PaperProReader:_actionsFactory(snapshot)
             highlight = function() self:performAction("highlight") end,
             define = function() self:performAction("define") end,
             note = function() self:performAction("note") end,
-        }, anchor_func)
+            ask_ai = function() self:performAction("ask_ai") end,
+        }, anchor_func, { ai_enabled = self.ai_settings:isEnabled() })
     end
+end
+
+function PaperProReader:_quickAskFactory(model)
+    return function(anchor_func, close_func)
+        return self.quick_ask_overlay:build(model, anchor_func, close_func, {
+            submit = function(question) self:_submitQuickAsk(question) end,
+            cancel = function(request_id) self:_cancelAIRequest(request_id) end,
+            retry = function(retry_model) self:_retryQuickAsk(retry_model) end,
+        })
+    end
+end
+
+function PaperProReader:_showQuickAsk(model)
+    self.current_ai_model = model
+    local shown = self.overlay:update(self:_quickAskFactory(model), model)
+    if shown and model.state == "compose" and self.overlay.widget.onShowKeyboard then
+        self.overlay.widget:onShowKeyboard()
+    end
+    return shown
+end
+
+function PaperProReader:_openQuickAsk()
+    local snapshot = self.current_snapshot
+    if not snapshot then return false end
+    self.active_ai_request = nil
+    return self:_showQuickAsk{
+        state = "compose",
+        question = "",
+        source_text = snapshot.text,
+        context_mode = self.ai_settings:getContextMode(),
+    }
+end
+
+function PaperProReader:_friendlyAIError(category)
+    local messages = {
+        disabled = _("AI questions are disabled"),
+        not_configured = _("Configure the reading assistant backend in Study"),
+        offline = _("You are offline"),
+        dns_failure = _("The backend address could not be found"),
+        timeout = _("The backend took too long to respond"),
+        tls_failure = _("The secure connection could not be verified"),
+        authentication = _("The backend token was rejected"),
+        backend_unavailable = _("The reading assistant is temporarily unavailable"),
+        rate_limited = _("The reading assistant is busy; try again shortly"),
+        malformed_response = _("The backend returned an unsupported response"),
+        unsupported_schema = _("The backend protocol is not compatible"),
+        question_empty = _("Enter a question"),
+        question_too_long = _("That question is too long"),
+        storage_failure = _("The question could not be saved locally"),
+    }
+    return messages[category] or _("The reading assistant could not answer this question")
+end
+
+function PaperProReader:_submitQuickAsk(question)
+    local snapshot = self.current_snapshot
+    if not snapshot then return false end
+    local context, context_err = self.context_resolver:resolve(self.ui, snapshot, {
+        context_mode = self.ai_settings:getContextMode(),
+    })
+    if not context then
+        return self:_showQuickAsk{
+            state = "compose", question = question, source_text = snapshot.text,
+            context_mode = self.ai_settings:getContextMode(),
+            message = self:_friendlyAIError(context_err),
+        }
+    end
+    local request, request_err = AIRequest.create(context, question, {
+        response_length = "concise", context_mode = context.context_mode,
+    })
+    if not request then
+        return self:_showQuickAsk{
+            state = "compose", question = question, source_text = snapshot.text,
+            context_mode = context.context_mode,
+            message = self:_friendlyAIError(request_err),
+        }
+    end
+    local queued, queue_err = self.offline_queue:enqueue(request)
+    if not queued then
+        return self:_showQuickAsk{
+            state = "error", question = question, source_text = snapshot.text,
+            context_mode = context.context_mode, message = self:_friendlyAIError(queue_err),
+            retryable = false,
+        }
+    end
+    self.active_ai_request = request.request_id
+    if self.ai_provider:isAvailable() then
+        self:_showQuickAsk{
+            state = "sending", request_id = request.request_id,
+            question = request.question.text, source_text = context.selection.text,
+            context_mode = context.context_mode,
+        }
+        self.offline_queue:processBatch(self.ai_provider, self.response_store, {
+            preferred_id = request.request_id, max_count = 1,
+        })
+    else
+        self:_showQuickAsk{
+            state = "queued", request_id = request.request_id,
+            question = request.question.text, source_text = context.selection.text,
+            context_mode = context.context_mode,
+            message = _("Saved. I'll answer when you're back online."),
+        }
+    end
+    return true
+end
+
+function PaperProReader:_onAIQueueItem(item)
+    self.ai_history:refreshIfOpen()
+    if self.document_closed or item.id ~= self.active_ai_request or not self.overlay:isOpen() then
+        return
+    end
+    local request = item.request
+    local model = {
+        state = item.state,
+        request_id = item.id,
+        question = request.question.text,
+        source_text = request.reading_context.selection.text,
+        context_mode = request.preferences.context_mode,
+    }
+    if item.state == "completed" then
+        local response = self.response_store:getByRequestId(item.id)
+        if not response then return end
+        model.state, model.answer = "success", response.answer
+    elseif item.state == "failed" then
+        model.state = "error"
+        model.message = self:_friendlyAIError(item.last_error_category)
+        model.retryable = item.last_error_category ~= "authentication"
+            and item.last_error_category ~= "unsupported_schema"
+    elseif item.state == "queued" then
+        model.message = _("Saved. I'll answer when you're back online.")
+    end
+    self:_showQuickAsk(model)
+end
+
+function PaperProReader:_cancelAIRequest(request_id)
+    if not request_id then return false end
+    self.ai_provider:cancel(request_id)
+    local cancelled = self.offline_queue:cancel(request_id)
+    if cancelled and self.active_ai_request == request_id and self.overlay:isOpen() then
+        self:_showQuickAsk{ state = "cancelled", request_id = request_id }
+    end
+    return cancelled
+end
+
+function PaperProReader:_retryQueuedAIRequest(request_id)
+    if not self.offline_queue:retry(request_id) then return false end
+    self.offline_queue:processBatch(self.ai_provider, self.response_store, {
+        preferred_id = request_id, max_count = 1,
+    })
+    return true
+end
+
+function PaperProReader:_retryQuickAsk(model)
+    if model.retryable and model.request_id and self:_retryQueuedAIRequest(model.request_id) then
+        model.state, model.message = "sending", nil
+        return self:_showQuickAsk(model)
+    end
+    return self:_showQuickAsk{
+        state = "compose", question = model.question or "",
+        source_text = model.source_text,
+        context_mode = model.context_mode or self.ai_settings:getContextMode(),
+    }
 end
 
 function PaperProReader:_definitionFactory(model)
@@ -99,6 +296,8 @@ function PaperProReader:_onOverlayDismissed()
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
+    self.current_ai_model = nil
+    self.active_ai_request = nil
     if self.ui and self.ui.highlight then
         self.ui.highlight:onClose()
     end
@@ -187,6 +386,8 @@ function PaperProReader:performAction(action)
             source_text = snapshot.text,
             note = "",
         }, snapshot.screen_boxes)
+    elseif action == "ask_ai" then
+        return self:_openQuickAsk()
     elseif action ~= "define" then
         return false
     end
@@ -229,6 +430,12 @@ end
 
 function PaperProReader:onAnnotationsModified()
     self.notes_hub:refreshIfOpen()
+end
+
+function PaperProReader:onNetworkConnected()
+    if self.ai_settings:isEnabled() then
+        self.offline_queue:processBatch(self.ai_provider, self.response_store)
+    end
 end
 
 function PaperProReader:onPageUpdate()
@@ -280,6 +487,55 @@ function PaperProReader:openVocabularyHub()
     return self.vocabulary_hub:open()
 end
 
+function PaperProReader:openAIHistory()
+    self.ink_service:deactivate()
+    self.overlay:dismiss(true)
+    self.current_snapshot, self.current_note = nil, nil
+    self.ui.highlight:onClose()
+    return self.ai_history:open()
+end
+
+function PaperProReader:openAIBackendSettings()
+    local config = self.ai_settings:getConfig()
+    local dialog
+    dialog = MultiInputDialog:new{
+        title = _("Reading assistant backend"),
+        fields = {
+            { text = config.backend_url, hint = _("https://reader.example.com") },
+            { text = config.backend_token, text_type = "password", hint = _("Device access token") },
+        },
+        buttons = {{
+            { text = _("Cancel"), callback = function() UIManager:close(dialog) end },
+            {
+                text = _("Save"),
+                callback = function()
+                    local fields = dialog:getFields()
+                    local ok, err = self.ai_settings:saveBackend(fields[1], fields[2])
+                    if ok then
+                        UIManager:close(dialog)
+                        if self.ai_settings:isEnabled() then
+                            self.offline_queue:processBatch(self.ai_provider, self.response_store)
+                        end
+                    else UIManager:show(InfoMessage:new{ text = err }) end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+function PaperProReader:testAIConnection()
+    UIManager:show(Notification:new{ text = _("Testing reading assistant…") })
+    self.ai_provider:testConnection(function(result, err)
+        if self.document_closed then return end
+        UIManager:show(InfoMessage:new{
+            text = result and _("Reading assistant connected")
+                or self:_friendlyAIError(err and err.category),
+        })
+    end)
+end
+
 function PaperProReader:addToMainMenu(menu_items)
     menu_items.paperpro_study = {
         text = _("Study"),
@@ -292,6 +548,54 @@ function PaperProReader:addToMainMenu(menu_items)
             {
                 text = _("Vocabulary"),
                 callback = function() self:openVocabularyHub() end,
+            },
+            {
+                text = _("AI Questions"),
+                callback = function() self:openAIHistory() end,
+            },
+            {
+                text = _("AI assistant"),
+                sub_item_table = {
+                    {
+                        text = _("Enabled"),
+                        checked_func = function() return self.ai_settings:isEnabled() end,
+                        callback = function()
+                            local enabled = not self.ai_settings:isEnabled()
+                            self.ai_settings:setEnabled(enabled)
+                            if enabled then
+                                self.offline_queue:processBatch(self.ai_provider, self.response_store)
+                            end
+                        end,
+                    },
+                    {
+                        text = _("Backend settings"),
+                        callback = function() self:openAIBackendSettings() end,
+                    },
+                    {
+                        text = _("Default context"),
+                        sub_item_table = {
+                            {
+                                text = _("Nearby"),
+                                checked_func = function()
+                                    return self.ai_settings:getContextMode() == "nearby"
+                                end,
+                                callback = function() self.ai_settings:setContextMode("nearby") end,
+                            },
+                            {
+                                text = _("Minimal"),
+                                checked_func = function()
+                                    return self.ai_settings:getContextMode() == "minimal"
+                                end,
+                                callback = function() self.ai_settings:setContextMode("minimal") end,
+                            },
+                        },
+                    },
+                    {
+                        text = _("Test connection"),
+                        enabled_func = function() return self.ai_settings:isConfigured() end,
+                        callback = function() self:testAIConnection() end,
+                    },
+                },
                 separator = true,
             },
             {
@@ -372,12 +676,18 @@ function PaperProReader:addToMainMenu(menu_items)
 end
 
 function PaperProReader:onCloseDocument()
+    self.document_closed = true
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
+    if self._ai_queue_listener then
+        self.offline_queue:removeListener(self._ai_queue_listener)
+        self._ai_queue_listener = nil
+    end
     self.ink_service:close()
     self.notes_hub:close()
     self.vocabulary_hub:close()
+    self.ai_history:close()
     self.overlay:dismiss(true)
 end
 
