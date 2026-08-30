@@ -35,6 +35,8 @@ function InkStroke:new(options)
         ended_at = options.ended_at,
         coordinate_space = options.coordinate_space or "screen-v1",
         anchor = deepCopy(options.anchor),
+        purpose = options.purpose,
+        conversation_id = options.conversation_id,
         points = deepCopy(options.points) or {},
         max_points = options.max_points or self.MAX_POINTS,
     }, self)
@@ -88,6 +90,8 @@ function InkStroke:toTable()
         ended_at = self.ended_at,
         coordinate_space = self.coordinate_space,
         anchor = deepCopy(self.anchor),
+        purpose = self.purpose,
+        conversation_id = self.conversation_id,
         points = deepCopy(self.points),
     }
 end
@@ -106,6 +110,8 @@ function InkStroke.fromTable(data)
         ended_at = data.ended_at,
         coordinate_space = data.coordinate_space,
         anchor = data.anchor,
+        purpose = data.purpose,
+        conversation_id = data.conversation_id,
     }
     for _, point in ipairs(data.points) do
         local added, err = stroke:addPoint(point)

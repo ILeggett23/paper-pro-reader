@@ -141,7 +141,7 @@ gesture recognition while leaving touch unchanged.
 
 ## Product-owned layer
 
-Phases 1 through 4 establish the product-owned modules under
+Phases 1 through 5 establish the product-owned modules under
 `frontend/apps/paperpro/`:
 
 ```text
@@ -162,6 +162,7 @@ frontend/apps/paperpro/
     offlinequeue.lua         durable retry/idempotency state machine
     responsestore.lua        local completed exchange authority
     anchornavigator.lua      validated ReaderLink/rolling/paging adapter
+    conversationservice.lua  bounded local canonical conversation history
   overlays/
     placement.lua            resolution-aware pure placement policy
     readeroverlay.lua        reusable bounded widget host/lifecycle
@@ -169,10 +170,13 @@ frontend/apps/paperpro/
     definitionoverlay.lua    definition, provenance, and persistence status panel
     noteoverlay.lua          contextual text note editor
     quickaskoverlay.lua      typed compose/queued/sending/result states
+    handwrittenresponserenderer.lua existing-font handwriting presentation
+    conversationmarker.lua  subtle visible-anchor AI discussion indicator
   hubs/
     vocabularyhub.lua        searchable review/detail/passage surface
     noteshub.lua             current-book note review/edit/delete/navigation
     aihistory.lua            current-book queued/completed AI review/navigation
+    conversationhub.lua      expanded conversation and Full Study surfaces
   ink/
     inkstroke.lua            bounded authoritative raw stroke model
     inkanchor.lua            strict EPUB layout and PDF page coordinates
@@ -181,6 +185,8 @@ frontend/apps/paperpro/
     inkstore.lua             atomic per-document RapidJSON sidecar
     inkservice.lua           Ink Mode, input lifecycle, undo/erase/reload
     rasterizer.lua           bounded derived handwriting bitmap
+    inkquestioncodec.lua     just-in-time bounded PNG transport artifact
+    inkquestionsession.lua   temporary Marker question InkService composition
 backend/                     authenticated provider-isolation service
 ```
 
@@ -189,13 +195,13 @@ module after ReaderDictionary; PaperProReader composes product behavior without
 taking ownership of the document, selection rendering, annotations, or
 dictionary engine. PaperProReader also registers the Study reader-menu entry
 and applies product-owned note-marker, vocabulary, AI, and ink settings.
-Phase 4 consumes existing network events and navigation APIs without taking
+Phases 4 and 5 consume existing network events and navigation APIs without taking
 ownership of network management, document navigation, or rendering.
 
 ## Product contracts
 
 SelectionSnapshot, DocumentAnchor, ReaderOverlay, ReadingContext, InkStroke,
-AIProvider, and OfflineQueue are implemented contracts. The device request and
+AIProvider, OfflineQueue, InkQuestionSession, and Conversation are implemented contracts. The device request and
 client remain provider-neutral; the isolated backend currently supplies one
 OpenAI Responses adapter.
 
@@ -285,3 +291,11 @@ LuaSocket/LuaSec transport, atomic global queue/response JSON stores, bounded
 retry, and network-event replay. Before transmission AIProvider removes local
 document identity and the navigation anchor. Backend authentication uses a
 revocable device token; `OPENAI_API_KEY` exists only in the backend environment.
+
+Phase 5 keeps request schema v1 text compatibility and adds schema v2 text or
+ink questions. Raw question vectors stay local; AIProvider regenerates a
+bounded PNG immediately before authenticated transport. ResponseStore schema 2
+migrates Phase 4 exchanges into single-turn conversations and owns bounded
+follow-ups, recognition text, anchors, and optional retained question ink.
+The backend performs one multimodal response with qualitative recognition and
+continues using `store: false` with no tools or web search.

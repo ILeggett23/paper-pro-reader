@@ -50,14 +50,19 @@ export function createApp({ config, provider, idempotency = new IdempotencyStore
     try {
       const url = new URL(request.url, "http://backend.local");
       if (request.method === "GET" && url.pathname === "/health") {
-        json(response, 200, { status: "ok", protocol_version: 1 });
+        json(response, 200, { status: "ok", protocol_version: 2 });
         return;
       }
       if (!authorized(request, config.deviceAccessToken)) {
         throw new AppError("authentication", 401, "Device token was rejected", false);
       }
       if (request.method === "GET" && url.pathname === "/v1/config") {
-        json(response, 200, { status: "ok", protocol_version: 1, question_types: ["text"] });
+        json(response, 200, { status: "ok", protocol_version: 2,
+          question_types: ["text", "ink"], image_limits: {
+            mime_types: ["image/png"], max_bytes: LIMITS.imageBytes,
+            max_width: LIMITS.imageWidth, max_height: LIMITS.imageHeight,
+            max_pixels: LIMITS.imagePixels,
+          } });
         return;
       }
       if (request.method !== "POST" || url.pathname !== "/v1/reading/answer") {
@@ -73,12 +78,23 @@ export function createApp({ config, provider, idempotency = new IdempotencyStore
           throw new AppError("malformed_provider_response", 502,
             "Provider returned an invalid answer", false);
         }
+        if (payload.question.type === "ink"
+            && (!['clear', 'uncertain', 'unreadable'].includes(providerResult.recognitionStatus)
+              || typeof providerResult.clarificationRequired !== "boolean"
+              || (providerResult.recognizedQuestion != null
+                && typeof providerResult.recognizedQuestion !== "string"))) {
+          throw new AppError("malformed_provider_response", 502,
+            "Provider returned invalid handwriting recognition", false);
+        }
         return {
-          schema_version: 1,
+          schema_version: 2,
           request_id: requestId,
           response_id: providerResult.responseId,
-          status: "completed",
+          status: providerResult.clarificationRequired ? "clarification_required" : "completed",
           answer: providerResult.answer,
+          recognized_question: providerResult.recognizedQuestion,
+          recognition_status: providerResult.recognitionStatus,
+          clarification_required: providerResult.clarificationRequired ?? false,
           created_at: payload.created_at,
           completed_at: Math.floor(Date.now() / 1000),
           metadata: { provider: "configured", model: providerResult.model },

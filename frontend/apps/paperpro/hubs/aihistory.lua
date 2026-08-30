@@ -28,20 +28,46 @@ end
 
 function AIHistory:_items()
     local document_id = self.navigator.ui.document.file
-    local items, completed = {}, {}
-    for _, response in ipairs(self.responses:listForDocument(document_id)) do
-        response.kind = "response"
-        response.display_status = "completed"
-        completed[response.request_id] = true
-        table.insert(items, response)
+    local items, completed, by_conversation = {}, {}, {}
+    if self.responses.listConversationsForDocument then
+        for _, conversation in ipairs(self.responses:listConversationsForDocument(document_id)) do
+            local turn = conversation.turns[#conversation.turns]
+            local item = {
+                kind = "conversation", conversation_id = conversation.conversation_id,
+                question = turn.question_text or turn.recognized_question or _("Handwritten question"),
+                answer = turn.answer, source_text = conversation.source_text,
+                chapter = conversation.chapter, anchor = conversation.anchor,
+                created_at = conversation.created_at, updated_at = conversation.updated_at,
+                display_status = turn.status == "clarification_required" and "failed" or "completed",
+                turn_count = #conversation.turns,
+            }
+            by_conversation[conversation.conversation_id] = item
+            table.insert(items, item)
+            for _, saved_turn in ipairs(conversation.turns) do completed[saved_turn.request_id] = true end
+        end
+    else
+        for _, response in ipairs(self.responses:listForDocument(document_id)) do
+            response.kind = "response"
+            response.display_status = "completed"
+            completed[response.request_id] = true
+            table.insert(items, response)
+        end
     end
     for _, queued in ipairs(self.queue:listForDocument(document_id)) do
         if not completed[queued.id] then
             local context = queued.request.reading_context
-            table.insert(items, {
+            local conversation_id = queued.request.conversation and queued.request.conversation.id
+            local existing = conversation_id and by_conversation[conversation_id]
+            if existing then
+                existing.display_status = queued.state
+                existing.request_id = queued.id
+                existing.last_error_category = queued.last_error_category
+                existing.updated_at = queued.updated_at
+            else table.insert(items, {
                 kind = "queue",
+                conversation_id = conversation_id,
                 request_id = queued.id,
-                question = queued.request.question.text,
+                question = queued.request.question.text or _("Handwritten question"),
                 source_text = context.selection.text,
                 chapter = context.location.chapter,
                 anchor = context.location.anchor,
@@ -49,7 +75,7 @@ function AIHistory:_items()
                 updated_at = queued.updated_at,
                 display_status = queued.state,
                 last_error_category = queued.last_error_category,
-            })
+            }) end
         end
     end
     table.sort(items, function(a, b)
@@ -68,6 +94,7 @@ function AIHistory:_menuItems()
             location = _("Page") .. " " .. tostring(item.anchor.page)
         end
         local metadata = status
+        if item.turn_count then metadata = metadata .. " • " .. tostring(item.turn_count) .. " " .. _("turns") end
         if location then metadata = metadata .. " • " .. tostring(location) end
         table.insert(rows, {
             text = excerpt(item.question) .. (item.answer and ("\n" .. excerpt(item.answer, 110)) or ""),
@@ -100,6 +127,11 @@ function AIHistory:_detailText(item)
 end
 
 function AIHistory:_showDetail(item)
+    if item.kind == "conversation" and self.on_open_conversation then
+        self:close()
+        self.on_open_conversation(item.conversation_id)
+        return
+    end
     local text, can_navigate = self:_detailText(item)
     local viewer
     local buttons = {{

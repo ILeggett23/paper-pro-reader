@@ -36,6 +36,30 @@ function validRequest(overrides = {}) {
   };
 }
 
+const PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+function validInkRequest(overrides = {}) {
+  const value = validRequest(overrides);
+  value.schema_version = 2;
+  value.question = {
+    type: "ink",
+    image: {
+      mime_type: "image/png",
+      data_base64: overrides.image ?? PNG_1X1,
+      bytes: Buffer.from(overrides.image ?? PNG_1X1, "base64").length,
+      width: overrides.width ?? 1,
+      height: overrides.height ?? 1,
+    },
+  };
+  value.conversation = {
+    id: overrides.conversation_id ?? "conversation-1",
+    turn_id: overrides.turn_id ?? "turn-1",
+    history: overrides.history ?? [],
+    history_truncated: false,
+  };
+  return value;
+}
+
 async function withApp({ provider, logger } = {}) {
   const app = createApp({
     config: { deviceAccessToken: "device-secret" },
@@ -52,13 +76,13 @@ test("health is public and configuration diagnostics require authentication", as
   const base = await withApp();
   const health = await fetch(`${base}/health`);
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: "ok", protocol_version: 1 });
+  assert.deepEqual(await health.json(), { status: "ok", protocol_version: 2 });
   assert.equal((await fetch(`${base}/v1/config`)).status, 401);
   const configured = await fetch(`${base}/v1/config`, {
     headers: { Authorization: "Bearer device-secret" },
   });
   assert.equal(configured.status, 200);
-  assert.deepEqual((await configured.json()).question_types, ["text"]);
+  assert.deepEqual((await configured.json()).question_types, ["text", "ink"]);
 });
 
 test("authenticated reading answers are schema-bound and idempotent", async () => {
@@ -138,6 +162,66 @@ test("backend rejects malformed provider results", async () => {
   assert.equal((await response.json()).error.category, "malformed_provider_response");
 });
 
+test("validates bounded ink PNGs and forwards image plus quoted context in memory", async () => {
+  let received;
+  const logs = [];
+  const base = await withApp({
+    provider: { answer: async request => {
+      received = request;
+      return { responseId: "ink-response", answer: "A contextual answer.",
+        recognizedQuestion: "Why does this matter?", recognitionStatus: "clear",
+        clarificationRequired: false, model: "mock-vision" };
+    } },
+    logger: { info: value => logs.push(value), warn: value => logs.push(value) },
+  });
+  const response = await fetch(`${base}/v1/reading/answer`, {
+    method: "POST",
+    headers: { Authorization: "Bearer device-secret", "Content-Type": "application/json" },
+    body: JSON.stringify(validInkRequest()),
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.recognized_question, "Why does this matter?");
+  assert.equal(body.recognition_status, "clear");
+  assert.equal(received.question.image.mime_type, "image/png");
+  assert.doesNotMatch(JSON.stringify(logs), new RegExp(PNG_1X1.slice(0, 20)));
+  const prompt = buildProviderInput(received);
+  assert.equal(prompt.input[0].content[1].type, "input_image");
+  assert.match(prompt.input[0].content[1].image_url, /^data:image\/png;base64,/);
+});
+
+test("rejects unsupported, corrupt, oversized, and mismatched ink images", () => {
+  const unsupported = validInkRequest();
+  unsupported.question.image.mime_type = "image/jpeg";
+  assert.throws(() => validateReadingRequest(unsupported), error => error.category === "invalid_image");
+  const corrupt = validInkRequest({ image: Buffer.from("not png").toString("base64") });
+  assert.throws(() => validateReadingRequest(corrupt), error => error.category === "invalid_image");
+  const dimensions = validInkRequest({ width: 2 });
+  assert.throws(() => validateReadingRequest(dimensions), error => error.category === "invalid_image_dimensions");
+  const oversized = validInkRequest();
+  oversized.question.image.bytes = LIMITS.imageBytes + 1;
+  assert.throws(() => validateReadingRequest(oversized), error => error.category === "image_too_large");
+});
+
+test("returns qualitative uncertain and unreadable clarification states", async () => {
+  for (const recognitionStatus of ["uncertain", "unreadable"]) {
+    const base = await withApp({ provider: { answer: async () => ({
+      responseId: `r-${recognitionStatus}`, answer: "Please clarify the handwriting.",
+      recognizedQuestion: recognitionStatus === "uncertain" ? "Why does ___ matter?" : undefined,
+      recognitionStatus, clarificationRequired: true, model: "mock",
+    }) } });
+    const response = await fetch(`${base}/v1/reading/answer`, {
+      method: "POST",
+      headers: { Authorization: "Bearer device-secret", "Content-Type": "application/json" },
+      body: JSON.stringify(validInkRequest({ request_id: `q-${recognitionStatus}` })),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, "clarification_required");
+    assert.equal(body.recognition_status, recognitionStatus);
+  }
+});
+
 test("OpenAI adapter uses the Responses API and extracts completed text", async () => {
   let captured;
   const provider = new OpenAIProvider({
@@ -172,6 +256,37 @@ test("OpenAI adapter categorizes rate limits and malformed results", async () =>
   });
   await assert.rejects(malformed.answer(validateReadingRequest(validRequest())),
     error => error.category === "malformed_provider_response");
+});
+
+test("OpenAI adapter sends one multimodal request and parses recognition JSON", async () => {
+  let payload;
+  const provider = new OpenAIProvider({
+    apiKey: "x", model: "vision-model",
+    fetchImpl: async (_url, options) => {
+      payload = JSON.parse(options.body);
+      return new Response(JSON.stringify({ id: "ink-ai", model: "vision-model", output: [{
+        type: "message", content: [{ type: "output_text", text: JSON.stringify({
+          recognition_status: "clear", recognized_question: "Why?",
+          clarification_required: false, answer: "Because of the supplied passage.",
+        }) }],
+      }] }), { status: 200 });
+    },
+  });
+  const result = await provider.answer(validateReadingRequest(validInkRequest()));
+  assert.equal(payload.store, false);
+  assert.equal(payload.input[0].content.filter(item => item.type === "input_image").length, 1);
+  assert.equal(result.recognizedQuestion, "Why?");
+  assert.equal(result.answer, "Because of the supplied passage.");
+});
+
+test("typed questions remain functional when image capability is unavailable", async () => {
+  const provider = new OpenAIProvider({
+    apiKey: "x", model: "text-model",
+    fetchImpl: async () => new Response(JSON.stringify({ error: {} }), { status: 400 }),
+  });
+  await assert.rejects(provider.answer(validateReadingRequest(validInkRequest())),
+    error => error.category === "model_capability");
+  assert.equal(validateReadingRequest(validRequest()).question.type, "text");
 });
 
 test("OpenAI adapter bounds provider timeouts", async () => {
