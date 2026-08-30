@@ -23,7 +23,7 @@ local function contextText(item)
     if item.prev_context and item.prev_context ~= "" then table.insert(parts, item.prev_context) end
     if item.source_text and item.source_text ~= "" then table.insert(parts, item.source_text) end
     if item.next_context and item.next_context ~= "" then table.insert(parts, item.next_context) end
-    return table.concat(parts, " ")
+    return table.concat(parts, " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
 end
 
 function VocabularyHub:_itemsForMenu(items)
@@ -39,7 +39,7 @@ function VocabularyHub:_itemsForMenu(items)
         })
         return menu_items
     end
-    for _, item in ipairs(items) do
+    for __, item in ipairs(items) do
         self.service:decodeItem(item)
         table.insert(menu_items, {
             text = item.word,

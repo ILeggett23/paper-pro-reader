@@ -23,7 +23,7 @@ function DefinitionOverlay:_body(model)
     end
 
     local definitions = {}
-    for _, definition in ipairs(model.definitions or {}) do
+    for __, definition in ipairs(model.definitions or {}) do
         local source = definition.dictionary_name and definition.dictionary_name ~= ""
             and ("\n" .. _("Source: ") .. definition.dictionary_name) or ""
         table.insert(definitions, definition.text .. source)

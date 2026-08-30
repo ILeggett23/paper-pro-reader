@@ -72,7 +72,7 @@ describe("Paper Pro Reader composition", function()
         selectWord()
         local page_before = readerui:getCurrentPage()
         assert.is_true(readerui.paperpro:performAction("note"))
-        assert.is_truthy(readerui.paperpro.overlay.widget:getButtonById("paperpro_note_save"))
+        assert.is_truthy(readerui.paperpro.overlay.widget.button_table:getButtonById("paperpro_note_save"))
         assert.are.same(0, #readerui.annotation.annotations)
         assert.is_true(readerui.paperpro:_saveNote("A contextual note."))
         assert.are.same(1, #readerui.annotation.annotations)
@@ -112,6 +112,7 @@ describe("Paper Pro Reader composition", function()
 
     it("updates DefinitionOverlay only after vocabulary persistence succeeds", function()
         selectWord()
+        readerui.paperpro.current_snapshot.selected_word = readerui.paperpro.current_snapshot.text
         local original_lookup = readerui.dictionary.lookupWordResults
         local original_record = readerui.paperpro.vocabulary_service.recordDefinition
         readerui.dictionary.lookupWordResults = function(_, query, _, callback)
