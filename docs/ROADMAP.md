@@ -19,14 +19,16 @@ Adapt Vocabulary Builder and ReaderAnnotation to retain definitions, source
 anchors, context, and review state; add inline note markers and Notes Hub
 navigation without introducing duplicate storage authorities.
 
-Implementation status: complete on `phase-2-vocabulary-contextual-notes`,
-pending review and merge into `main`.
+Implementation status: complete and merged into `main` by pull request #2.
 
 ## Phase 3 — Marker ink foundation
 
 Verify Paper Pro evdev capabilities, capture and persist raw strokes, add
 bounded low-latency ink rendering, and derive raster artifacts. Pressure remains
 optional until hardware evidence proves it.
+
+Implementation status: complete on `phase-3-marker-ink`, pending review and
+merge into `main`.
 
 ## Phase 4 — Provider-neutral AI and offline queue
 
@@ -40,5 +42,5 @@ Add handwritten-question recognition, text or handwriting-styled responses,
 expanded conversation/full-study states, and a complete library/study visual
 system using complete-line or completed-response e-ink updates.
 
-The only recommended next implementation phase is Phase 3: Marker ink
-foundation. AI and handwriting recognition remain later work.
+The only recommended next implementation phase is Phase 4: provider-neutral AI
+and offline queue. Handwriting recognition remains later work.
