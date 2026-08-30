@@ -2,7 +2,7 @@
 
 ## Stage A
 
-Current RC identity: `0.6.0-rc2` / Phase 6 RC2.
+Current RC identity: `0.6.0-rc3` / Phase 6 RC3.
 
 Stage A provides:
 
@@ -22,6 +22,13 @@ identified two product-owned paint windows above ReaderUI. RC2 makes the ink
 canvas input-passive and forwards gestures outside the AI conversation marker
 to ReaderUI. No device, evdev, QTFB, framebuffer, or engine file changes.
 
+RC2 physically passed touch routing, Quickstart controls, EPUB navigation,
+position persistence, selection, notes, completed ink, undo, eraser, and ink
+persistence. Its remaining blocker was live ink: the active line appeared only
+after pen lift. RC3 keeps RC2 behavior and changes only active-segment painting
+to the already-proven bounded `ui` refresh while batching every segment received
+before the next paint.
+
 The package contains the native KOReader aarch64 launcher, resources, pinned
 libraries, Paper Pro product modules, `koreader.sh`, QTFB/AppLoad manifests,
 keep-alive helper, and aarch64 README. Xovi, qt-resource-rebuilder, rm-appload,
@@ -39,6 +46,7 @@ Study > Diagnostics can enable a bounded JSON-lines log and view a report with:
 - queue-state counts;
 - Ink Mode and stylus-callback state.
 - RC2 product-overlay touch-routing identity.
+- RC3 live-ink refresh strategy identity.
 
 Logged lifecycle fields are restricted to event, request ID, state, error
 category, points, bounds, mode, and duration. Keys, tokens, URLs, book text,
@@ -56,10 +64,10 @@ scp root@<PAPER_PRO_IP>:/home/root/xovi/exthome/appload/koreader/settings/paperp
 
 ## Stage B
 
-Stage B continues when the user upgrades to RC2 and returns
+Stage B continues when the user upgrades to RC3 and returns
 `PAPER_PRO_TEST_REPORT_TEMPLATE.md`. No physical qualification row becomes
 PASS before that explicit evidence. Failures enter the controlled process in
 `PHASE6_FEEDBACK_LOOP.md`, produce an identified RC2/RC3, and retain previous
 artifacts and checksums.
 
-Current state: **BLOCKED — RC1 TOUCH INPUT FAILURE; RC2 PHYSICAL RETEST REQUIRED**.
+Current state: **BLOCKED — RC2 LIVE ACTIVE-STROKE RENDERING FAILURE; RC3 PHYSICAL RETEST REQUIRED**.

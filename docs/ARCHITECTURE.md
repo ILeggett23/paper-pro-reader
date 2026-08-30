@@ -315,3 +315,9 @@ small conversation marker explicitly returns unmatched gestures to ReaderUI.
 This preserves the existing evdev -> Input -> gesture detector pipeline and
 does not change Paper Pro node selection, coordinates, QTFB, UIManager, or
 stylus filtering.
+
+RC3 retains that routing and changes only the product canvas's live paint
+policy. Active Marker segments are accumulated until `InkCanvas:paintTo()` and
+refreshed with bounded `ui` regions, matching the physically working pen-lift
+path. Finalization, anchors, storage, undo/redo, eraser, ReaderUI, UIManager,
+and framebuffer implementations are unchanged.

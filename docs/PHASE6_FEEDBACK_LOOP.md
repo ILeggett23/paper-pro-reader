@@ -1,6 +1,6 @@
 # Phase 6 hardware feedback loop
 
-Phase 6 remains open through RC2 physical qualification. Every returned finding is classified:
+Phase 6 remains open through RC3 physical qualification. Every returned finding is classified:
 
 - `INSTALL`
 - `CRASH`
@@ -45,4 +45,18 @@ whether the stock UI recovered.
   UIManager from dispatching gestures to ReaderUI
 - RC2 action: paint-only ink input pass-through, unmatched marker gesture
   forwarding, safe `touch_route` diagnostics, and focused UIManager regression
-- Status: RC2 PHYSICAL RETEST REQUIRED
+- Status: RC2 PHYSICAL PASS
+
+## RC2 finding 002
+
+- Classification: `REFRESH`
+- Device: reMarkable Paper Pro, OS 3.27.3.0
+- Result: Marker capture, completed-stroke rendering, undo, eraser, and
+  persistence PASS; active stroke invisible until pen lift
+- Narrowest layer: `InkCanvas:requestActiveSegment()` requested bounded `fast`
+  refreshes while the working final path requested bounded `ui` refreshes
+- Additional source risk: one pending segment slot could overwrite earlier
+  segments when multiple Marker frames arrived in one input batch
+- RC3 action: use bounded `ui` refresh for live segments and retain all pending
+  segments until the next canvas paint
+- Status: RC3 PHYSICAL RETEST REQUIRED

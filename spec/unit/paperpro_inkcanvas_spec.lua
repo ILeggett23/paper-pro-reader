@@ -46,7 +46,7 @@ describe("Paper Pro InkCanvas", function()
         assert.are.same(320, canvas:getDrawingBounds().w)
     end)
 
-    it("requests fast active, quality final, and bounded restore regions", function()
+    it("requests bounded UI refreshes for active, final, and restore regions", function()
         local calls = {}
         local ui_manager = {
             show = function() end,
@@ -63,12 +63,36 @@ describe("Paper Pro InkCanvas", function()
             ui_manager = ui_manager,
         }
         local active_region = canvas:requestActiveSegment({ x = 100, y = 100 }, { x = 110, y = 105 })
-        assert.are.same("fast", calls[1].refresh)
+        assert.are.same("ui", calls[1].refresh)
         assert.is_true(active_region.w < 30 and active_region.h < 30)
         canvas:requestFinalStroke{ tool = "pen", points = {{ x = 100, y = 100 }, { x = 110, y = 105 }} }
         assert.are.same("ui", calls[2].refresh)
         canvas:restoreRegion(active_region)
         assert.are.same("partial", calls[3].refresh)
         assert.is_equal(reader_ui.dialog, calls[3].widget)
+    end)
+
+    it("retains every active segment received before the next paint", function()
+        local drawn = {}
+        local renderer = {
+            boundsForPoints = function()
+                return Geom:new{ x = 8, y = 8, w = 24, h = 8 }
+            end,
+            drawSegment = function(_, first, second)
+                table.insert(drawn, { first, second })
+            end,
+        }
+        local canvas = InkCanvas:new{
+            dimen = Geom:new{ x = 0, y = 0, w = 320, h = 480 },
+            renderer = renderer,
+            ui_manager = { show = function() end, close = function() end, setDirty = function() end },
+        }
+        canvas:requestActiveSegment({ x = 10, y = 10 }, { x = 20, y = 10 })
+        canvas:requestActiveSegment({ x = 20, y = 10 }, { x = 30, y = 10 })
+        assert.are.same(2, #canvas.paint_segments)
+
+        canvas:paintTo({}, 0, 0)
+        assert.are.same(2, #drawn)
+        assert.are.same(0, #canvas.paint_segments)
     end)
 end)

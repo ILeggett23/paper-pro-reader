@@ -58,4 +58,11 @@ extension and rebuilding the Xovi hashtable.
 4. Swipe once and tap another visible control.
 5. Stop and report immediately if any of those three gestures fails.
 
-RC2 touch remains **NOT TESTED** until the user returns this hardware result.
+## Physical result
+
+RC2 PASS: launch, Quickstart controls, finger swipe, exit, EPUB page turns,
+position persistence, word selection, note creation, and note persistence.
+RC1's touch blocker is closed. Dictionary lookup was inconclusive because no
+local KOReader dictionary had yet been verified. Ink capture, completed-stroke
+rendering, undo, deletion, eraser, and persistence passed; live active-stroke
+rendering became the separate RC3 blocker.

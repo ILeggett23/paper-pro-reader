@@ -88,6 +88,14 @@ coordinate transform, QTFB manifest, Input handler, and stylus callback are
 unchanged. Optional diagnostics record only `touch_route` state and gesture
 mode, never coordinates or reading content.
 
+RC2 physical testing proved Marker capture, coordinate routing, completed
+stroke rendering, undo, eraser, and persistence, but active strokes were not
+presented until pen lift. On the shimmed path, `fast` maps to the reMarkable DU
+waveform while the working final-stroke `ui` path maps to GL16. RC3 therefore
+uses the same bounded `ui` mode for live segment regions and queues every
+segment received before the next paint. It does not request full-screen or
+flashing refreshes and does not change QTFB/framebuffer code.
+
 ## Firmware and installation risks
 
 - reMarkable OS updates can change input-node numbering, QTFB compatibility,

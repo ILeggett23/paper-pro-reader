@@ -53,8 +53,10 @@ user-driven hardware qualification loop.
 
 Stage A status: complete on `phase-6-paperpro-qualification`. RC1 installed and
 rendered on OS 3.27.3.0 but was blocked by a product-overlay touch-routing
-failure. RC2 is the minimal corrective candidate and remains pending physical
-retest. Phase 6 stays open until that evidence is reviewed.
+failure. RC2 physically fixed touch and validated core reading, notes, and ink
+persistence; live ink remained invisible until pen lift. RC3 is the minimal
+active-refresh candidate and remains pending physical retest. Phase 6 stays
+open until that evidence is reviewed.
 
 The next phase should focus only on physical Paper Pro qualification and
 product polish: real Marker/refresh/latency evidence, shared backend

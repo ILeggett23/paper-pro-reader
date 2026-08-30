@@ -17,6 +17,7 @@ local InkCanvas = WidgetContainer:extend{
 function InkCanvas:init()
     self.ui_manager = self.ui_manager or UIManager
     self.dimen = self.dimen or Geom:new{ x = 0, y = 0, w = 600, h = 800 }
+    self.paint_segments = {}
     self.status_bounds = Geom:new{
         x = self.dimen.x + self.dimen.w - math.min(96, math.floor(self.dimen.w * 0.2)),
         y = self.dimen.y,
@@ -52,7 +53,7 @@ function InkCanvas:detach()
     self.attached = false
     self.ui_manager:close(self)
     self.active_stroke = nil
-    self.paint_segment = nil
+    self.paint_segments = {}
     return true
 end
 
@@ -96,9 +97,11 @@ function InkCanvas:_paintStatus(bb, x, y)
 end
 
 function InkCanvas:paintTo(bb, x, y)
-    if self.paint_segment then
-        self.renderer:drawSegment(bb, self.paint_segment[1], self.paint_segment[2], x, y)
-        self.paint_segment = nil
+    if self.paint_segments[1] then
+        for _, segment in ipairs(self.paint_segments) do
+            self.renderer:drawSegment(bb, segment[1], segment[2], x, y)
+        end
+        self.paint_segments = {}
         return
     end
     if self.service then
@@ -114,7 +117,7 @@ function InkCanvas:setInkMode(enabled, eraser_mode)
     local previous_bounds = self.status_bounds:copy()
     self.ink_mode = enabled and true or false
     self.eraser_mode = eraser_mode and true or false
-    self.paint_segment = nil
+    self.paint_segments = {}
     if self.ink_mode and self.show_status then
         self.ui_manager:setDirty(self, "ui", previous_bounds)
     elseif self.show_status and self.reader_ui then
@@ -131,16 +134,21 @@ function InkCanvas:setActiveStroke(stroke)
 end
 
 function InkCanvas:requestActiveSegment(previous_point, point)
-    self.paint_segment = { previous_point, point }
+    local segment = { previous_point, point }
+    table.insert(self.paint_segments, segment)
     local region = self.renderer:boundsForPoints(
-        self.paint_segment, self.dimen, 1)
-    if region then self.ui_manager:setDirty(self, "fast", region) end
+        segment, self.dimen, 1)
+    -- The Paper Pro QTFB shim did not visibly present the DU/fast path during
+    -- physical RC2 testing. Use the same bounded UI refresh that already
+    -- presents completed strokes, while retaining every segment received in a
+    -- single input batch until paintTo drains it.
+    if region then self.ui_manager:setDirty(self, "ui", region) end
     return region
 end
 
 function InkCanvas:requestFinalStroke(stroke)
     self.active_stroke = nil
-    self.paint_segment = nil
+    self.paint_segments = {}
     local region = self.renderer:boundsForStroke(stroke, self.dimen, 2)
     if region then self.ui_manager:setDirty(self, "ui", region) end
     return region
@@ -148,7 +156,7 @@ end
 
 function InkCanvas:restoreRegion(region)
     self.active_stroke = nil
-    self.paint_segment = nil
+    self.paint_segments = {}
     if region and self.reader_ui then
         self.ui_manager:setDirty(self.reader_ui.dialog, "partial", region)
     end

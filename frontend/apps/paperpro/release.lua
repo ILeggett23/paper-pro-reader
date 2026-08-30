@@ -1,4 +1,4 @@
 return {
-    version = "0.6.0-rc2",
-    stage = "Phase 6 RC2",
+    version = "0.6.0-rc3",
+    stage = "Phase 6 RC3",
 }
