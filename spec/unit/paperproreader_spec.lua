@@ -64,6 +64,16 @@ describe("Paper Pro Reader composition", function()
         assert.is_true(menu_items.paperpro_study.sub_item_table[3].check_callback_closes_menu)
     end)
 
+    it("defers InkCanvas attachment until it can sit above ReaderUI", function()
+        readerui.paperpro.ink_service:close()
+        readerui.paperpro:onReaderReady()
+        assert.is_function(readerui.paperpro._attach_ink_canvas)
+        fastforward_ui_events()
+        assert.is_true(readerui.paperpro.ink_canvas.attached)
+        assert.is_equal(readerui.paperpro.ink_canvas,
+            UIManager._window_stack[#UIManager._window_stack].widget)
+    end)
+
     it("uses the existing highlight annotation authority", function()
         selectWord()
         assert.is_true(readerui.paperpro:performAction("highlight"))

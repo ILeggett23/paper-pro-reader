@@ -258,7 +258,11 @@ end
 
 function PaperProReader:onReaderReady()
     self:_applyNoteMarkerPolicy(false)
-    self.ink_service:attach()
+    self._attach_ink_canvas = function()
+        self.ink_service:attach()
+        self._attach_ink_canvas = nil
+    end
+    UIManager:nextTick(self._attach_ink_canvas)
 end
 
 function PaperProReader:openNotesHub()
@@ -372,6 +376,10 @@ function PaperProReader:onCloseDocument()
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
+    if self._attach_ink_canvas then
+        UIManager:unschedule(self._attach_ink_canvas)
+        self._attach_ink_canvas = nil
+    end
     self.ink_service:close()
     self.notes_hub:close()
     self.vocabulary_hub:close()
