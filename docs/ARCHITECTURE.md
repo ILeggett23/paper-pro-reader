@@ -141,7 +141,7 @@ gesture recognition while leaving touch unchanged.
 
 ## Product-owned layer
 
-Phases 1 and 2 establish the product-owned modules under
+Phases 1 through 4 establish the product-owned modules under
 `frontend/apps/paperpro/`:
 
 ```text
@@ -153,15 +153,26 @@ frontend/apps/paperpro/
     vocabularyservice.lua    rich Vocabulary Builder event adapter/navigation
     anchorcodec.lua          safe EPUB/PDF anchor column serialization
     annotationservice.lua    stable annotation references and authoritative operations
+    contextresolver.lua      bounded provider-neutral EPUB/PDF reading context
+    airequest.lua            typed stable-ID request contract
+    aisettings.lua           backend settings and remote-HTTPS policy
+    aiprovider.lua           provider-neutral authenticated backend client
+    httptransport.lua        subprocess LuaSocket/LuaSec completion transport
+    atomicjsonstore.lua      versioned atomic JSON recovery primitive
+    offlinequeue.lua         durable retry/idempotency state machine
+    responsestore.lua        local completed exchange authority
+    anchornavigator.lua      validated ReaderLink/rolling/paging adapter
   overlays/
     placement.lua            resolution-aware pure placement policy
     readeroverlay.lua        reusable bounded widget host/lifecycle
-    contextualactions.lua    Highlight/Define/Note/disabled Ask AI surface
+    contextualactions.lua    Highlight/Define/Note/Ask AI surface
     definitionoverlay.lua    definition, provenance, and persistence status panel
     noteoverlay.lua          contextual text note editor
+    quickaskoverlay.lua      typed compose/queued/sending/result states
   hubs/
     vocabularyhub.lua        searchable review/detail/passage surface
     noteshub.lua             current-book note review/edit/delete/navigation
+    aihistory.lua            current-book queued/completed AI review/navigation
   ink/
     inkstroke.lua            bounded authoritative raw stroke model
     inkanchor.lua            strict EPUB layout and PDF page coordinates
@@ -170,21 +181,23 @@ frontend/apps/paperpro/
     inkstore.lua             atomic per-document RapidJSON sidecar
     inkservice.lua           Ink Mode, input lifecycle, undo/erase/reload
     rasterizer.lua           bounded derived handwriting bitmap
+backend/                     authenticated provider-isolation service
 ```
 
 ReaderUI remains the functional reader. It registers PaperProReader as one
 module after ReaderDictionary; PaperProReader composes product behavior without
 taking ownership of the document, selection rendering, annotations, or
 dictionary engine. PaperProReader also registers the Study reader-menu entry
-and applies product-owned note-marker and automatic-vocabulary settings. AI
-queue work remains unimplemented.
+and applies product-owned note-marker, vocabulary, AI, and ink settings.
+Phase 4 consumes existing network events and navigation APIs without taking
+ownership of network management, document navigation, or rendering.
 
-## Future contracts
+## Product contracts
 
-SelectionSnapshot, DocumentAnchor, ReaderOverlay, and the local definition model
-are implemented Lua-table contracts. ReadingContext, InkStroke, AIProvider, and
-OfflineQueue remain future contracts and do not prescribe a cloud vendor or a
-new database.
+SelectionSnapshot, DocumentAnchor, ReaderOverlay, ReadingContext, InkStroke,
+AIProvider, and OfflineQueue are implemented contracts. The device request and
+client remain provider-neutral; the isolated backend currently supplies one
+OpenAI Responses adapter.
 
 ### DocumentAnchor
 
@@ -209,9 +222,13 @@ ownership of highlighting or selection rendering.
 ### ReadingContext
 
 ```text
-selection, sentence?, paragraph?, nearby_paragraphs?
-book_title, author, chapter?, anchor
-capabilities = { sentence, paragraph, precise_anchor }
+schema_version
+book = { document_id, title?, author? }
+location = { chapter?, anchor }
+selection = { text, selected_word? }
+context = { before?, after?, sentence?, paragraph? }
+context_mode, truncation
+capabilities = { sentence, paragraph, semantic_context, precise_anchor, fixed_layout }
 ```
 
 Missing provider capabilities are explicit; callers must not confuse inferred
@@ -229,8 +246,8 @@ getRefreshRegion()
 
 All overlays preserve the reading position, choose above/below/side placement
 from available space, are touch/Marker friendly, and request only the necessary
-UIManager repaint region. Quick Ask is the default future AI state; expanded
-conversation and full study are explicit transitions.
+UIManager repaint region. Quick Ask is the implemented compact AI state;
+expanded conversation and full study remain explicit later transitions.
 
 ### InkStroke
 
@@ -249,13 +266,22 @@ future recognition or AI input; Phase 3 sends it nowhere.
 AIProvider:isAvailable()
 AIProvider:submit(request, callbacks) -> request_id
 AIProvider:cancel(request_id)
+AIProvider:testConnection(callback)
 
 OfflineQueue:enqueue(request)
-OfflineQueue:markSending(id)
-OfflineQueue:markCompleted(id, response)
-OfflineQueue:markFailed(id, retry_metadata)
+OfflineQueue:processNext(provider, response_store)
+OfflineQueue:processBatch(provider, response_store)
+OfflineQueue:retry(id)
+OfflineQueue:cancel(id)
+OfflineQueue:listForDocument(document_id)
 ```
 
 Requests contain a provider-neutral ReadingContext plus typed question input.
 The device talks to a secure backend; permanent provider secrets never reside
 in the application. Saved responses remain readable offline.
+
+Phase 4 implements this contract with stable UUIDs, a subprocess-backed
+LuaSocket/LuaSec transport, atomic global queue/response JSON stores, bounded
+retry, and network-event replay. Before transmission AIProvider removes local
+document identity and the navigation anchor. Backend authentication uses a
+revocable device token; `OPENAI_API_KEY` exists only in the backend environment.
