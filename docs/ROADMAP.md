@@ -27,8 +27,7 @@ Verify Paper Pro evdev capabilities, capture and persist raw strokes, add
 bounded low-latency ink rendering, and derive raster artifacts. Pressure remains
 optional until hardware evidence proves it.
 
-Implementation status: complete on `phase-3-marker-ink`, pending review and
-merge into `main`.
+Implementation status: complete and merged into `main` by pull request #3.
 
 ## Phase 4 — Provider-neutral AI and offline queue
 
@@ -36,11 +35,16 @@ Implement ContextResolver, secure-backend AIProvider, queued offline requests,
 saved-response reading, and the Quick Ask overlay. No permanent provider secret
 is stored on the device.
 
+Implementation status: complete on `phase-4-ai-context-offline`, pending
+review and merge into `main`.
+
 ## Phase 5 — Book Writes Back and study surfaces
 
 Add handwritten-question recognition, text or handwriting-styled responses,
 expanded conversation/full-study states, and a complete library/study visual
 system using complete-line or completed-response e-ink updates.
 
-The only recommended next implementation phase is Phase 4: provider-neutral AI
-and offline queue. Handwriting recognition remains later work.
+The only recommended next implementation phase is Phase 5. It may add typed or
+recognized handwritten question input and expanded study surfaces while
+retaining Phase 4 context, authentication, queue, response, and navigation
+contracts.

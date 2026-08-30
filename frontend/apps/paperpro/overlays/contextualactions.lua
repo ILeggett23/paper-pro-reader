@@ -8,8 +8,9 @@ function ContextualActions:new(options)
     return setmetatable(options or {}, self)
 end
 
-function ContextualActions:build(snapshot, callbacks, anchor_func)
+function ContextualActions:build(snapshot, callbacks, anchor_func, options)
     callbacks = callbacks or {}
+    options = options or {}
     return ButtonDialog:new{
         title = snapshot.selected_word or snapshot.text,
         title_align = "left",
@@ -37,9 +38,9 @@ function ContextualActions:build(snapshot, callbacks, anchor_func)
                 },
                 {
                     id = "paperpro_ask_ai",
-                    text = _("Ask AI — Coming later"),
-                    enabled = false,
-                    callback = function() end,
+                    text = options.ai_enabled and _("Ask AI") or _("Ask AI — Disabled"),
+                    enabled = options.ai_enabled and snapshot.anchor ~= nil,
+                    callback = callbacks.ask_ai or function() end,
                 },
             },
         },
