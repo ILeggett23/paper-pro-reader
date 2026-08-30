@@ -25,14 +25,17 @@ The authoritative upstream procedure is the
 
 ## Download and verify
 
-Download the GitHub Actions artifact named:
+From the successful **paper-pro-release-candidate** workflow run, download both
+artifacts:
 
 ```text
 paper-pro-reader-remarkable-aarch64-<full-commit-sha>
+paper-pro-reader-remarkable-aarch64-<full-commit-sha>-metadata
 ```
 
-It contains the native `tar.xz`, `.sha256`, release manifest, and contents
-listing. On macOS/Linux, in the download directory:
+The first is the directly installable native `tar.xz`. The metadata artifact
+contains its `.sha256`, release manifest, and contents listing. Extract the
+metadata download beside the `tar.xz`, then on macOS/Linux run:
 
 ```sh
 shasum -a 256 -c paper-pro-reader-remarkable-aarch64-0.6.0-rc1-*.tar.xz.sha256

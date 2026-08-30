@@ -5,7 +5,7 @@ Update it only from the user's returned physical report.
 
 | Area | Automated/CI | Emulator/runtime | Physical Paper Pro |
 | --- | --- | --- | --- |
-| Package architecture/contents | PENDING RC CI | NOT APPLICABLE | NOT TESTED |
+| Package architecture/contents | AUTOMATED RC CI ONLY | NOT APPLICABLE | NOT TESTED |
 | Installation via AppLoad | source-verified | NOT APPLICABLE | NOT TESTED |
 | Launch / exit to stock UI | package scripts inspected | macOS runtime only | NOT TESTED |
 | EPUB open/render/navigation | PASS | PASS | NOT TESTED |
