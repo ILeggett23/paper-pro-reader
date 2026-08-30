@@ -11,6 +11,7 @@ local ConversationMarker = require("apps/paperpro/overlays/conversationmarker")
 local ContextualActions = require("apps/paperpro/overlays/contextualactions")
 local DefinitionOverlay = require("apps/paperpro/overlays/definitionoverlay")
 local DefinitionService = require("apps/paperpro/services/definitionservice")
+local Diagnostics = require("apps/paperpro/services/diagnostics")
 local Device = require("device")
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
@@ -33,6 +34,7 @@ local SelectionService = require("apps/paperpro/services/selectionservice")
 local VocabularyHub = require("apps/paperpro/hubs/vocabularyhub")
 local VocabularyService = require("apps/paperpro/services/vocabularyservice")
 local UIManager = require("ui/uimanager")
+local TextViewer = require("ui/widget/textviewer")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
@@ -129,6 +131,10 @@ function PaperProReader:init()
             rasterizer = self.ink_rasterizer,
         }
     end
+    self.diagnostics = self.diagnostics or Diagnostics:new{
+        ai_settings = self.ai_settings, queue = self.offline_queue,
+        ink_service = self.ink_service,
+    }
     self.overlay = self.overlay or ReaderOverlay:new{
         on_dismiss = function()
             self:_onOverlayDismissed()
@@ -183,6 +189,7 @@ function PaperProReader:_quickAskFactory(model)
 end
 
 function PaperProReader:_showQuickAsk(model)
+    if self.diagnostics then self.diagnostics:record("overlay_state", { state = model.state }) end
     if model.state ~= "write" then self:_closeInkQuestionSession() end
     self.current_ai_model = model
     local shown = self.overlay:update(self:_quickAskFactory(model), model)
@@ -393,6 +400,9 @@ function PaperProReader:_enqueueAIRequest(request, context)
 end
 
 function PaperProReader:_onAIQueueItem(item)
+    if self.diagnostics then self.diagnostics:record("ai_queue", {
+        request_id = item.id, state = item.state, category = item.last_error_category,
+    }) end
     self.ai_history:refreshIfOpen()
     self.conversation_marker:refresh()
     if self.document_closed or item.id ~= self.active_ai_request or not self.overlay:isOpen() then
@@ -778,6 +788,19 @@ function PaperProReader:testAIConnection()
     end)
 end
 
+function PaperProReader:showDiagnostics()
+    local viewer
+    viewer = TextViewer:new{
+        title = _("Paper Pro diagnostics"),
+        text = self.diagnostics:report(),
+        buttons_table = {{
+            { text = _("Close"), callback = function() UIManager:close(viewer) end },
+        }},
+    }
+    UIManager:show(viewer)
+    return true
+end
+
 function PaperProReader:addToMainMenu(menu_items)
     menu_items.paperpro_study = {
         text = _("Study"),
@@ -858,6 +881,30 @@ function PaperProReader:addToMainMenu(menu_items)
                         text = _("Test connection"),
                         enabled_func = function() return self.ai_settings:isConfigured() end,
                         callback = function() self:testAIConnection() end,
+                    },
+                    {
+                        text = _("Allow private-LAN HTTP for testing"),
+                        checked_func = function() return self.ai_settings:allowInsecureLAN() end,
+                        callback = function()
+                            self.ai_settings:setAllowInsecureLAN(not self.ai_settings:allowInsecureLAN())
+                        end,
+                    },
+                },
+                separator = true,
+            },
+            {
+                text = _("Diagnostics"),
+                sub_item_table = {
+                    {
+                        text = _("Enable diagnostic log"),
+                        checked_func = function() return self.diagnostics:isEnabled() end,
+                        callback = function()
+                            self.diagnostics:setEnabled(not self.diagnostics:isEnabled())
+                        end,
+                    },
+                    {
+                        text = _("View diagnostic report"),
+                        callback = function() self:showDiagnostics() end,
                     },
                 },
                 separator = true,
@@ -940,6 +987,7 @@ function PaperProReader:addToMainMenu(menu_items)
 end
 
 function PaperProReader:onCloseDocument()
+    if self.diagnostics then self.diagnostics:record("document_close") end
     self.document_closed = true
     self.active_lookup = nil
     self.current_snapshot = nil

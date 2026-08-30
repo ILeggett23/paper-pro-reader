@@ -8,13 +8,14 @@ AISettings.KEYS = {
     context_mode = "paperpro_ai_context_mode",
     response_style = "paperpro_ai_response_style",
     input_mode = "paperpro_ai_input_mode",
+    allow_insecure_lan = "paperpro_ai_allow_insecure_lan",
 }
 
 local function trim(value)
     return type(value) == "string" and value:match("^%s*(.-)%s*$") or ""
 end
 
-local function validURL(url)
+local function validURL(url, allow_insecure_lan)
     url = trim(url):gsub("/+$", "")
     if url == "" then return nil, "Backend URL is required" end
     if #url > 512 then return nil, "Backend URL is too long" end
@@ -23,6 +24,12 @@ local function validURL(url)
             or url:match("^http://%[::1%][:/]?") then
         return url
     end
+    local host = url:match("^http://([^/:]+)")
+    local private = host and (host:match("^10%.")
+        or host:match("^192%.168%.")
+        or host:match("^172%.1[6-9]%.") or host:match("^172%.2[0-9]%.")
+        or host:match("^172%.3[0-1]%.") or host:match("^169%.254%."))
+    if allow_insecure_lan and private then return url end
     return nil, "Remote backends must use HTTPS"
 end
 
@@ -85,7 +92,7 @@ function AISettings:getConfig()
 end
 
 function AISettings:saveBackend(url, token)
-    local normalized, err = validURL(url)
+    local normalized, err = validURL(url, self:allowInsecureLAN())
     if not normalized then return false, err end
     token = trim(token)
     if token == "" then return false, "Backend token is required" end
@@ -97,7 +104,16 @@ end
 
 function AISettings:isConfigured()
     local config = self:getConfig()
-    return validURL(config.backend_url) ~= nil and config.backend_token ~= ""
+    return validURL(config.backend_url, self:allowInsecureLAN()) ~= nil
+        and config.backend_token ~= ""
+end
+
+function AISettings:allowInsecureLAN()
+    return self.settings:isTrue(self.KEYS.allow_insecure_lan)
+end
+
+function AISettings:setAllowInsecureLAN(value)
+    self.settings:saveSetting(self.KEYS.allow_insecure_lan, value and true or false)
 end
 
 AISettings.validURL = validURL

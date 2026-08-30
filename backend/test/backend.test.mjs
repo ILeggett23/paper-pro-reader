@@ -5,11 +5,15 @@ import { createApp } from "../src/app.mjs";
 import { AppError } from "../src/errors.mjs";
 import { buildProviderInput, READING_INSTRUCTIONS } from "../src/prompt.mjs";
 import { OpenAIProvider } from "../src/providers/openai.mjs";
+import { FileIdempotencyStore } from "../src/idempotency.mjs";
 import { LIMITS, validateReadingRequest } from "../src/validation.mjs";
 
 const servers = [];
+const tempDirs = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))));
+  const { rm } = await import("node:fs/promises");
+  await Promise.all(tempDirs.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
 
 function validRequest(overrides = {}) {
@@ -100,6 +104,34 @@ test("authenticated reading answers are schema-bound and idempotent", async () =
   assert.equal(second.status, 200);
   assert.deepEqual(await first.json(), await second.json());
   assert.equal(calls, 1);
+});
+
+test("persistent idempotency survives restart, expires, and stores no request context", async () => {
+  const { mkdtemp, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const directory = await mkdtemp(join(tmpdir(), "paperpro-idempotency-"));
+  tempDirs.push(directory);
+  const path = join(directory, "idempotency.json");
+  let now = 1_000, calls = 0;
+  const first = new FileIdempotencyStore({ path, clock: () => now, ttlMs: 100 });
+  const response = await first.run("stable-request", async () => {
+    calls += 1;
+    return { request_id: "stable-request", answer: "Known response", status: "completed" };
+  });
+  const restarted = new FileIdempotencyStore({ path, clock: () => now, ttlMs: 100 });
+  const replayed = await restarted.run("stable-request", async () => {
+    calls += 1;
+    return { answer: "duplicate" };
+  });
+  assert.deepEqual(replayed, response);
+  assert.equal(calls, 1);
+  const persisted = await readFile(path, "utf8");
+  assert.doesNotMatch(persisted, /book_context|data_base64|PRIVATE/);
+  now = 1_101;
+  const expired = new FileIdempotencyStore({ path, clock: () => now, ttlMs: 100 });
+  await expired.run("stable-request", async () => { calls += 1; return { answer: "new" }; });
+  assert.equal(calls, 2);
 });
 
 test("validation rejects oversized and local-only navigation data", () => {
