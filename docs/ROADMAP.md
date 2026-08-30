@@ -11,14 +11,16 @@ offline definition path using ReaderDictionary/StarDict while retaining
 Highlight and Note actions. Ask AI is represented only as a disabled future
 capability. No handwriting or network AI is included.
 
-Implementation status: complete on `phase-1-selection-overlay`, pending review
-and merge into `main`.
+Implementation status: complete and merged into `main` by pull request #1.
 
 ## Phase 2 — Vocabulary and contextual notes
 
 Adapt Vocabulary Builder and ReaderAnnotation to retain definitions, source
 anchors, context, and review state; add inline note markers and Notes Hub
 navigation without introducing duplicate storage authorities.
+
+Implementation status: complete on `phase-2-vocabulary-contextual-notes`,
+pending review and merge into `main`.
 
 ## Phase 3 — Marker ink foundation
 
@@ -35,8 +37,8 @@ is stored on the device.
 ## Phase 5 — Book Writes Back and study surfaces
 
 Add handwritten-question recognition, text or handwriting-styled responses,
-expanded conversation/full-study states, and intentional Notes/Vocabulary
-review pages using complete-line or completed-response e-ink updates.
+expanded conversation/full-study states, and a complete library/study visual
+system using complete-line or completed-response e-ink updates.
 
-The only recommended next implementation phase after this foundation is
-Phase 1.
+The only recommended next implementation phase is Phase 3: Marker ink
+foundation. AI and handwriting recognition remain later work.

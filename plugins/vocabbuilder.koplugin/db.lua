@@ -1,12 +1,13 @@
 local DataStorage = require("datastorage")
 local Device = require("device")
+local JSON = require("rapidjson")
 local SQ3 = require("lua-ljsqlite3/init")
 local LuaData = require("luadata")
 local logger = require("logger")
 
 local db_location = DataStorage:getSettingsDir() .. "/vocabulary_builder.sqlite3"
 
-local DB_SCHEMA_VERSION = 20240905
+local DB_SCHEMA_VERSION = 20260830
 local VOCABULARY_DB_SCHEMA = [[
     -- To store looked up words
     CREATE TABLE IF NOT EXISTS vocabulary (
@@ -20,6 +21,21 @@ local VOCABULARY_DB_SCHEMA = [[
         next_context  TEXT,
         streak_count  INTEGER NOT NULL DEFAULT 0,
         highlight     TEXT,
+        definition    TEXT,
+        dictionary_source TEXT,
+        definitions_json TEXT,
+        author        TEXT,
+        chapter       TEXT,
+        document_id   TEXT,
+        source_text   TEXT,
+        anchor_kind   TEXT,
+        anchor_start  TEXT,
+        anchor_finish TEXT,
+        anchor_page   INTEGER,
+        anchor_pos0_json TEXT,
+        anchor_pos1_json TEXT,
+        anchor_page_boxes_json TEXT,
+        updated_time  INTEGER,
         PRIMARY KEY(word)
     );
     CREATE TABLE IF NOT EXISTS title (
@@ -35,6 +51,15 @@ local VOCABULARY_DB_SCHEMA = [[
 local VocabularyBuilder = {
     path = db_location
 }
+
+local function hasColumn(conn, table_name, column_name)
+    local columns = conn:exec("PRAGMA table_info(" .. table_name .. ");")
+    if not (columns and columns.name) then return false end
+    for _, name in ipairs(columns.name) do
+        if name == column_name then return true end
+    end
+    return false
+end
 
 function VocabularyBuilder:init()
     VocabularyBuilder:createDB()
@@ -54,8 +79,8 @@ function VocabularyBuilder:selectCount(vocab_widget)
     return count
 end
 
-function VocabularyBuilder:createDB()
-    local db_conn = SQ3.open(db_location)
+function VocabularyBuilder:createDB(path)
+    local db_conn = SQ3.open(path or self.path)
     -- Make it WAL, if possible
     if Device:canUseWAL() then
         db_conn:exec("PRAGMA journal_mode=WAL;")
@@ -102,6 +127,35 @@ function VocabularyBuilder:createDB()
         if db_version < 20240905 then
             ok, re = pcall(db_conn.exec, db_conn, "ALTER TABLE vocabulary ADD highlight TEXT;")
             if not ok then log(re) end
+        end
+        if db_version < 20260830 then
+            local rich_columns = {
+                "definition TEXT", "dictionary_source TEXT", "definitions_json TEXT",
+                "author TEXT", "chapter TEXT", "document_id TEXT", "source_text TEXT",
+                "anchor_kind TEXT", "anchor_start TEXT", "anchor_finish TEXT",
+                "anchor_page INTEGER", "anchor_pos0_json TEXT", "anchor_pos1_json TEXT",
+                "anchor_page_boxes_json TEXT", "updated_time INTEGER",
+            }
+            db_conn:exec("BEGIN IMMEDIATE;")
+            local migration_ok = true
+            for _, column in ipairs(rich_columns) do
+                local column_name = column:match("^(%S+)")
+                if not hasColumn(db_conn, "vocabulary", column_name) then
+                    ok, re = pcall(db_conn.exec, db_conn, "ALTER TABLE vocabulary ADD " .. column .. ";")
+                    if not ok then
+                        log(re)
+                        migration_ok = false
+                        break
+                    end
+                end
+            end
+            if migration_ok then
+                db_conn:exec("COMMIT;")
+            else
+                pcall(db_conn.exec, db_conn, "ROLLBACK;")
+                db_conn:close()
+                return false
+            end
         end
 
         db_conn:exec("CREATE INDEX IF NOT EXISTS title_id_index ON vocabulary(title_id);")
@@ -301,9 +355,63 @@ function VocabularyBuilder:insertOrUpdate(entry)
     conn:close()
 end
 
-function VocabularyBuilder:hasWord(word)
-    local conn = SQ3.open(db_location)
-    local sql = [[SELECT title.name as book_title, vocabulary.word, create_time, review_time, due_time, review_count, streak_count, prev_context, next_context, highlight
+-- Enrich an existing review row without changing spaced-repetition state.
+-- If the word does not yet exist, create the authoritative review row with
+-- the same neutral initial state used by normal lookup insertion.
+function VocabularyBuilder:enrichDefinition(entry, path)
+    local conn = SQ3.open(path or self.path)
+    local stmt = conn:prepare("SELECT count(0) FROM vocabulary WHERE word = ?;")
+    local existed = tonumber(stmt:bind(entry.word):step()[1]) ~= 0
+    stmt:close()
+    stmt = conn:prepare("INSERT OR IGNORE INTO title (name) VALUES (?);")
+    stmt:bind(entry.book_title or ""):step()
+    stmt:close()
+    stmt = conn:prepare([[
+        INSERT INTO vocabulary
+            (word, title_id, create_time, due_time, review_time, prev_context, next_context, highlight,
+             definition, dictionary_source, definitions_json, author, chapter, document_id, source_text,
+             anchor_kind, anchor_start, anchor_finish, anchor_page, anchor_pos0_json, anchor_pos1_json,
+             anchor_page_boxes_json, updated_time)
+        VALUES (?, (SELECT id FROM title WHERE name = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(word) DO UPDATE SET
+            title_id = excluded.title_id,
+            prev_context = COALESCE(NULLIF(excluded.prev_context, ''), prev_context),
+            next_context = COALESCE(NULLIF(excluded.next_context, ''), next_context),
+            highlight = COALESCE(NULLIF(excluded.highlight, ''), highlight),
+            definition = COALESCE(NULLIF(excluded.definition, ''), definition),
+            dictionary_source = COALESCE(NULLIF(excluded.dictionary_source, ''), dictionary_source),
+            definitions_json = COALESCE(NULLIF(excluded.definitions_json, ''), definitions_json),
+            author = COALESCE(NULLIF(excluded.author, ''), author),
+            chapter = COALESCE(NULLIF(excluded.chapter, ''), chapter),
+            document_id = COALESCE(NULLIF(excluded.document_id, ''), document_id),
+            source_text = COALESCE(NULLIF(excluded.source_text, ''), source_text),
+            anchor_kind = COALESCE(NULLIF(excluded.anchor_kind, ''), anchor_kind),
+            anchor_start = COALESCE(NULLIF(excluded.anchor_start, ''), anchor_start),
+            anchor_finish = COALESCE(NULLIF(excluded.anchor_finish, ''), anchor_finish),
+            anchor_page = COALESCE(excluded.anchor_page, anchor_page),
+            anchor_pos0_json = COALESCE(NULLIF(excluded.anchor_pos0_json, ''), anchor_pos0_json),
+            anchor_pos1_json = COALESCE(NULLIF(excluded.anchor_pos1_json, ''), anchor_pos1_json),
+            anchor_page_boxes_json = COALESCE(NULLIF(excluded.anchor_page_boxes_json, ''), anchor_page_boxes_json),
+            updated_time = MAX(COALESCE(updated_time, 0), excluded.updated_time);
+    ]])
+    local time = entry.time or os.time()
+    stmt:bind(entry.word, entry.book_title or "", time, time + 300, time,
+        entry.prev_context, entry.next_context, entry.highlight, entry.definition,
+        entry.dictionary_source, entry.definitions_json, entry.author, entry.chapter,
+        entry.document_id, entry.source_text, entry.anchor_kind, entry.anchor_start,
+        entry.anchor_finish, entry.anchor_page, entry.anchor_pos0_json, entry.anchor_pos1_json,
+        entry.anchor_page_boxes_json, entry.updated_time or time)
+    stmt:step()
+    stmt:close()
+    conn:close()
+    return existed and "already" or "added"
+end
+
+function VocabularyBuilder:hasWord(word, path)
+    local conn = SQ3.open(path or self.path)
+    local sql = [[SELECT title.name as book_title, vocabulary.word, create_time, review_time, due_time, review_count, streak_count, prev_context, next_context, highlight,
+          definition, dictionary_source, definitions_json, author, chapter, document_id, source_text, anchor_kind,
+          anchor_start, anchor_finish, anchor_page, anchor_pos0_json, anchor_pos1_json, anchor_page_boxes_json, updated_time
           FROM vocabulary INNER JOIN title ON title_id = title.id WHERE word = ?]]
     local stmt = conn:prepare(sql)
     stmt:bind(word)
@@ -322,10 +430,38 @@ function VocabularyBuilder:hasWord(word)
             prev_context = result[8],
             next_context = result[9],
             highlight = result[10],
+            definition = result[11], dictionary_source = result[12], definitions_json = result[13],
+            author = result[14], chapter = result[15], document_id = result[16], source_text = result[17],
+            anchor_kind = result[18], anchor_start = result[19], anchor_finish = result[20],
+            anchor_page = tonumber(result[21]), anchor_pos0_json = result[22], anchor_pos1_json = result[23],
+            anchor_page_boxes_json = result[24], updated_time = tonumber(result[25]),
         }
     else
         return nil
     end
+end
+
+function VocabularyBuilder:selectRichItems(search_text, path)
+    local conn = SQ3.open(path or self.path)
+    local sql = [[SELECT vocabulary.word FROM vocabulary
+        WHERE (? = '' OR vocabulary.word LIKE ?)
+        ORDER BY COALESCE(updated_time, create_time) DESC, vocabulary.word ASC;]]
+    local stmt = conn:prepare(sql)
+    local query = search_text or ""
+    stmt:bind(query, "%" .. query .. "%")
+    local words = {}
+    while true do
+        local row = stmt:step()
+        if not row then break end
+        table.insert(words, row[1])
+    end
+    stmt:close()
+    conn:close()
+    local items = {}
+    for _, word in ipairs(words) do
+        table.insert(items, self:hasWord(word, path))
+    end
+    return items
 end
 
 function VocabularyBuilder:toggleBookFilter(ids)
@@ -432,7 +568,65 @@ function VocabularyBuilder.onSync(local_path, cached_path, income_path)
     end
 
     -- Handle possible inconsistensies in db version
-    pcall(conn_income.exec, conn_income, "ALTER TABLE vocabulary ADD highlight TEXT;")
+    local sync_columns = {
+        "highlight TEXT", "definition TEXT", "dictionary_source TEXT", "definitions_json TEXT",
+        "author TEXT", "chapter TEXT", "document_id TEXT", "source_text TEXT", "anchor_kind TEXT",
+        "anchor_start TEXT", "anchor_finish TEXT", "anchor_page INTEGER", "anchor_pos0_json TEXT",
+        "anchor_pos1_json TEXT", "anchor_page_boxes_json TEXT", "updated_time INTEGER",
+    }
+    for _, column in ipairs(sync_columns) do
+        local column_name = column:match("^(%S+)")
+        if not hasColumn(conn_income, "vocabulary", column_name) then
+            pcall(conn_income.exec, conn_income, "ALTER TABLE vocabulary ADD " .. column .. ";")
+        end
+    end
+
+    -- Do not let incomplete or malformed rich payloads from an older/edited
+    -- database erase a valid local anchor or definition list during merge.
+    local rich_rows = conn_income:exec([[SELECT rowid AS rich_rowid, definitions_json,
+        document_id, anchor_kind, anchor_start, anchor_finish, anchor_page,
+        anchor_pos0_json, anchor_pos1_json, anchor_page_boxes_json FROM vocabulary;]])
+    if rich_rows then
+        local clear_anchor = conn_income:prepare([[UPDATE vocabulary SET
+            document_id = NULL, anchor_kind = NULL, anchor_start = NULL, anchor_finish = NULL,
+            anchor_page = NULL, anchor_pos0_json = NULL, anchor_pos1_json = NULL,
+            anchor_page_boxes_json = NULL WHERE rowid = ?;]])
+        local clear_definitions = conn_income:prepare(
+            "UPDATE vocabulary SET definitions_json = NULL WHERE rowid = ?;")
+        local function decodedTable(value)
+            if not value or value == "" then return nil end
+            local result = JSON.decode(value)
+            return type(result) == "table" and result or nil
+        end
+        for i, rowid in ipairs(rich_rows.rich_rowid) do
+            local definitions_json = rich_rows.definitions_json[i]
+            if definitions_json and not decodedTable(definitions_json) then
+                clear_definitions:bind(rowid):step()
+                clear_definitions:clearbind():reset()
+            end
+            local kind = rich_rows.anchor_kind[i]
+            local has_anchor_data = rich_rows.document_id[i] or kind
+                or rich_rows.anchor_start[i] or rich_rows.anchor_finish[i]
+                or rich_rows.anchor_page[i] or rich_rows.anchor_pos0_json[i]
+                or rich_rows.anchor_pos1_json[i] or rich_rows.anchor_page_boxes_json[i]
+            local document_id = rich_rows.document_id[i]
+            local valid_anchor = kind == "xpointer" and document_id and document_id ~= ""
+                and rich_rows.anchor_start[i] and rich_rows.anchor_start[i] ~= ""
+                and rich_rows.anchor_finish[i] and rich_rows.anchor_finish[i] ~= ""
+                or kind == "fixed_page" and document_id and document_id ~= ""
+                and tonumber(rich_rows.anchor_page[i])
+                and decodedTable(rich_rows.anchor_pos0_json[i])
+                and decodedTable(rich_rows.anchor_pos1_json[i])
+                and (not rich_rows.anchor_page_boxes_json[i]
+                    or decodedTable(rich_rows.anchor_page_boxes_json[i]))
+            if has_anchor_data and not valid_anchor then
+                clear_anchor:bind(rowid):step()
+                clear_anchor:clearbind():reset()
+            end
+        end
+        clear_anchor:close()
+        clear_definitions:close()
+    end
 
     local sql = "attach '" .. income_path:gsub("'", "''") .."' as income_db;"
     -- then we try to open cached db
@@ -490,8 +684,12 @@ function VocabularyBuilder.onSync(local_path, cached_path, income_path)
 
         -- Then we merge the income_db's contents into the local db
         INSERT INTO vocabulary
-              (word, create_time, review_time, due_time, review_count, prev_context, next_context, title_id, streak_count, highlight)
-        SELECT word, create_time, review_time, due_time, review_count, prev_context, next_context, title_id, streak_count, highlight
+              (word, create_time, review_time, due_time, review_count, prev_context, next_context, title_id, streak_count, highlight,
+               definition, dictionary_source, definitions_json, author, chapter, document_id, source_text, anchor_kind,
+               anchor_start, anchor_finish, anchor_page, anchor_pos0_json, anchor_pos1_json, anchor_page_boxes_json, updated_time)
+        SELECT word, create_time, review_time, due_time, review_count, prev_context, next_context, title_id, streak_count, highlight,
+               definition, dictionary_source, definitions_json, author, chapter, document_id, source_text, anchor_kind,
+               anchor_start, anchor_finish, anchor_page, anchor_pos0_json, anchor_pos1_json, anchor_page_boxes_json, updated_time
         FROM income_db.vocabulary WHERE true
         ON CONFLICT(word) DO UPDATE SET
         due_time = MAX(due_time, excluded.due_time),
@@ -502,6 +700,21 @@ function VocabularyBuilder.onSync(local_path, cached_path, income_path)
         prev_context = ifnull(excluded.prev_context, prev_context),
         next_context = ifnull(excluded.next_context, next_context),
         highlight = ifnull(excluded.highlight, highlight),
+        definition = COALESCE(NULLIF(excluded.definition, ''), definition),
+        dictionary_source = COALESCE(NULLIF(excluded.dictionary_source, ''), dictionary_source),
+        definitions_json = COALESCE(NULLIF(excluded.definitions_json, ''), definitions_json),
+        author = COALESCE(NULLIF(excluded.author, ''), author),
+        chapter = COALESCE(NULLIF(excluded.chapter, ''), chapter),
+        document_id = COALESCE(NULLIF(document_id, ''), NULLIF(excluded.document_id, '')),
+        source_text = COALESCE(NULLIF(excluded.source_text, ''), source_text),
+        anchor_kind = COALESCE(NULLIF(anchor_kind, ''), NULLIF(excluded.anchor_kind, '')),
+        anchor_start = COALESCE(NULLIF(anchor_start, ''), NULLIF(excluded.anchor_start, '')),
+        anchor_finish = COALESCE(NULLIF(anchor_finish, ''), NULLIF(excluded.anchor_finish, '')),
+        anchor_page = COALESCE(anchor_page, excluded.anchor_page),
+        anchor_pos0_json = COALESCE(NULLIF(anchor_pos0_json, ''), NULLIF(excluded.anchor_pos0_json, '')),
+        anchor_pos1_json = COALESCE(NULLIF(anchor_pos1_json, ''), NULLIF(excluded.anchor_pos1_json, '')),
+        anchor_page_boxes_json = COALESCE(NULLIF(anchor_page_boxes_json, ''), NULLIF(excluded.anchor_page_boxes_json, '')),
+        updated_time = MAX(COALESCE(updated_time, 0), COALESCE(excluded.updated_time, 0)),
         streak_count = CASE
             WHEN review_time > excluded.review_time THEN streak_count
             ELSE excluded.streak_count

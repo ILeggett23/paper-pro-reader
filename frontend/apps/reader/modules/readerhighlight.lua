@@ -1009,6 +1009,27 @@ function ReaderHighlight:onTap(_, ges)
             end
         end
         if #highlights_tapped > 0 then
+            if #highlights_tapped == 1 then
+                local index = highlights_tapped[1]
+                local annotation = self.ui.annotation.annotations[index]
+                if annotation.note then
+                    local payload = {
+                        annotation = util.tableDeepCopy(annotation),
+                        annotation_ref = {
+                            document_id = self.ui.document.file,
+                            datetime = annotation.datetime,
+                            page = util.tableDeepCopy(annotation.page),
+                            pos0 = util.tableDeepCopy(annotation.pos0),
+                            pos1 = util.tableDeepCopy(annotation.pos1),
+                        },
+                        screen_boxes = util.tableDeepCopy(self:getHighlightVisibleBoxes(index) or {}),
+                        has_note = true,
+                    }
+                    if self.ui:handleEvent(Event:new("ShowAnnotationNote", payload)) then
+                        return true
+                    end
+                end
+            end
             return self:showChooseHighlightDialog(highlights_tapped)
         end
     end
@@ -2335,6 +2356,23 @@ function ReaderHighlight:addNote(text)
         end
         self:editNote(index, true, text)
     end)
+end
+
+-- Presentation-neutral creation seam for highlight-backed notes. Persistence
+-- stays with ReaderAnnotation/ReaderBookmark and keeps the existing PDF path.
+function ReaderHighlight:commitNoteForCurrentSelection(note_text, callback)
+    local index = self:saveHighlight()
+    if not index then
+        if callback then callback(nil, "No active selection") end
+        return nil
+    end
+    local annotation = self.ui.bookmark:updateAnnotationNote(index, note_text, "highlight")
+    self:clear()
+    if self.view.highlight.note_mark then
+        UIManager:setDirty(self.dialog, "ui")
+    end
+    if callback then callback(annotation) end
+    return annotation
 end
 
 function ReaderHighlight:editNote(index, is_new_note, text)

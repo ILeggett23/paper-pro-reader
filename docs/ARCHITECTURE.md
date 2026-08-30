@@ -90,23 +90,28 @@ ReaderDictionary uses local StarDict data through `sdcv`. A lookup emits
 `WordLookedUp(word, book_title)` before result retrieval. Vocabulary Builder
 listens for this event and records the word, title, discovery/review times,
 surrounding context, highlighted selection, review count, and streak in
-`vocabulary_builder.sqlite3`.
+`vocabulary_builder.sqlite3`. Phase 2 adds a separate post-result
+`DefinitionResolved` event: it enriches that same authoritative row with the
+normalized local definition results, source attribution, book metadata, and a
+safe document anchor without altering its review schedule.
 
-Known gaps at this baseline:
+Baseline gaps and their current status:
 
-- `WordLookedUp` does not include the chosen definition or final result set.
-- Vocabulary Builder does not persist definition, chapter, or a navigable
-  document anchor.
+- `WordLookedUp` still intentionally does not include the chosen definition or
+  final result set; `DefinitionResolved` is the compatible post-result seam.
+- Phase 2 extends Vocabulary Builder to retain definitions, chapter, document
+  metadata, and EPUB/PDF anchors. Older rows remain valid with nullable fields.
 - PDF sentence/paragraph inference is less capable than EPUB inference.
-- These gaps require narrow adapters or schema migrations later; they do not
-  justify replacing dictionary, annotation, or vocabulary storage.
+- The remaining provider gap does not justify replacing dictionary,
+  annotation, or vocabulary storage.
 
 ReaderAnnotation loads and saves the `annotations` collection in the
 document's DocSettings sidecar. Reflowable annotations use XPointer positions;
-fixed-layout annotations use pages and coordinate ranges. ReaderBookmark is the
-existing browsing/editing surface for bookmarks, highlights, and notes and can
-navigate back to the stored passage. A future Notes Hub should adapt these
-records rather than create a second annotation authority.
+fixed-layout annotations use pages and coordinate ranges. ReaderBookmark owns
+note mutation, PDF write-through, annotation event counts, and passage
+navigation. Phase 2's AnnotationService resolves stable references against this
+collection and the Notes Hub reads it live; there is no second annotation
+authority.
 
 ## Plugins and statistics
 
@@ -134,7 +139,7 @@ driver.
 
 ## Product-owned layer
 
-Phase 1 establishes the first product-owned modules under
+Phases 1 and 2 establish the product-owned modules under
 `frontend/apps/paperpro/`:
 
 ```text
@@ -143,18 +148,26 @@ frontend/apps/paperpro/
   services/
     selectionservice.lua     immutable EPUB/PDF selection snapshots
     definitionservice.lua    normalized local dictionary result models
+    vocabularyservice.lua    rich Vocabulary Builder event adapter/navigation
+    anchorcodec.lua          safe EPUB/PDF anchor column serialization
+    annotationservice.lua    stable annotation references and authoritative operations
   overlays/
     placement.lua            resolution-aware pure placement policy
     readeroverlay.lua        reusable bounded widget host/lifecycle
     contextualactions.lua    Highlight/Define/Note/disabled Ask AI surface
-    definitionoverlay.lua    loading/result/no-result/error definition panel
+    definitionoverlay.lua    definition, provenance, and persistence status panel
+    noteoverlay.lua          contextual text note editor
+  hubs/
+    vocabularyhub.lua        searchable review/detail/passage surface
+    noteshub.lua             current-book note review/edit/delete/navigation
 ```
 
 ReaderUI remains the functional reader. It registers PaperProReader as one
 module after ReaderDictionary; PaperProReader composes product behavior without
 taking ownership of the document, selection rendering, annotations, or
-dictionary engine. Future adapters, vocabulary/annotation services, AI queue,
-and ink work remain unimplemented.
+dictionary engine. PaperProReader also registers the Study reader-menu entry
+and applies product-owned note-marker and automatic-vocabulary settings. AI
+queue and ink work remain unimplemented.
 
 ## Future contracts
 

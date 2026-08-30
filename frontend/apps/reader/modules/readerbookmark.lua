@@ -485,9 +485,34 @@ function ReaderBookmark:removeItemByIndex(index)
 end
 
 function ReaderBookmark:deleteItemNote(item)
-    local index = self:getBookmarkItemIndex(item)
-    self.ui.annotation.annotations[index].note = nil
-    self.ui:handleEvent(Event:new("AnnotationsModified", { item, nb_highlights_added = 1, nb_notes_added = -1 }))
+    self:updateAnnotationNote(item, "")
+end
+
+-- Presentation-neutral note persistence seam. Product UIs may supply their own
+-- editor while ReaderBookmark remains responsible for annotation mutation,
+-- PDF write-through, and AnnotationsModified bookkeeping.
+function ReaderBookmark:updateAnnotationNote(item_or_index, value, type_before)
+    local index = type(item_or_index) == "number"
+        and item_or_index or self:getBookmarkItemIndex(item_or_index)
+    local annotation = index and self.ui.annotation.annotations[index]
+    if not annotation then return nil end
+
+    type_before = type_before or self.getBookmarkType(annotation)
+    self.ui.highlight:writePdfAnnotation("content", annotation, value or "")
+    annotation.note = value ~= "" and value or nil
+    local type_after = self.getBookmarkType(annotation)
+    if type_before ~= type_after then
+        if type_before == "highlight" then
+            self.ui:handleEvent(Event:new("AnnotationsModified",
+                { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
+        else
+            self.ui:handleEvent(Event:new("AnnotationsModified",
+                { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
+        end
+    else
+        self.ui:handleEvent(Event:new("AnnotationsModified", { annotation }))
+    end
+    return annotation, index, type_after
 end
 
 -- navigation
@@ -1423,28 +1448,16 @@ function ReaderBookmark:setBookmarkNote(item_or_index, is_new_note, new_note, ca
                     is_enter_default = true,
                     callback = function()
                         local value = input_dialog:getInputText()
-                        self.ui.highlight:writePdfAnnotation("content", annotation, value)
-                        if value == "" then -- blank input deletes note
-                            value = nil
-                        end
-                        annotation.note = value
-                        local type_after = self.getBookmarkType(annotation)
-                        if type_before ~= type_after then
-                            if type_before == "highlight" then
-                                self.ui:handleEvent(Event:new("AnnotationsModified",
-                                    { annotation, nb_highlights_added = -1, nb_notes_added = 1 }))
-                            else
-                                self.ui:handleEvent(Event:new("AnnotationsModified",
-                                    { annotation, nb_highlights_added = 1, nb_notes_added = -1 }))
-                            end
-                        end
+                        local updated_annotation, updated_index, type_after =
+                            self:updateAnnotationNote(index, value, type_before)
+                        annotation, index = updated_annotation, updated_index
                         UIManager:close(input_dialog)
                         if item then
-                            item.note = value
+                            item.note = annotation.note
                             item.type = type_after
                             item.text = self:getBookmarkItemText(item)
                         end
-                        caller_callback()
+                        if caller_callback then caller_callback() end
                     end,
                 },
             }
