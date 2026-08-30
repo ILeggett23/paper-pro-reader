@@ -177,6 +177,34 @@ Event: time 1510346969.076908, -------------- SYN_REPORT ------------
             Input.MTSlots = old_slots
         end)
 
+        it("retains optional pressure on the generic stylus callback payload", function()
+            local pen_slot = {
+                slot = Input.pen_slot, id = 9, x = 10, y = 20,
+                tool = Input.TOOL_TYPE_PEN,
+            }
+            local old_callback = Input.stylus_callback
+            withInputState({
+                cur_slot = Input.pen_slot,
+                ev_slots = { [Input.pen_slot] = pen_slot },
+                active_slots = { [Input.pen_slot] = true },
+                MTSlots = { pen_slot },
+            }, function()
+                Input:handleTouchEv{
+                    type = C.EV_ABS,
+                    code = C.ABS_PRESSURE,
+                    value = 321,
+                }
+                local received
+                Input:registerStylusCallback(function(_, slot)
+                    received = slot
+                    return true
+                end)
+                Input:routeStylusEvents()
+                assert.are.same(321, received.pressure)
+            end)
+            Input.stylus_callback = old_callback
+        end)
+
         it("does not turn SDL pen side buttons into eraser tool selectors", function()
             local old_device = Input.device
             local old_event_map = Input.event_map

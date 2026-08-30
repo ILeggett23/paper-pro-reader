@@ -2,8 +2,18 @@ local AnnotationService = require("apps/paperpro/services/annotationservice")
 local ContextualActions = require("apps/paperpro/overlays/contextualactions")
 local DefinitionOverlay = require("apps/paperpro/overlays/definitionoverlay")
 local DefinitionService = require("apps/paperpro/services/definitionservice")
+local Device = require("device")
+local ConfirmBox = require("ui/widget/confirmbox")
+local InfoMessage = require("ui/widget/infomessage")
+local InkAnchor = require("apps/paperpro/ink/inkanchor")
+local InkCanvas = require("apps/paperpro/ink/inkcanvas")
+local InkRenderer = require("apps/paperpro/ink/inkrenderer")
+local InkService = require("apps/paperpro/ink/inkservice")
+local InkStore = require("apps/paperpro/ink/inkstore")
 local NoteOverlay = require("apps/paperpro/overlays/noteoverlay")
 local NotesHub = require("apps/paperpro/hubs/noteshub")
+local Notification = require("ui/widget/notification")
+local Rasterizer = require("apps/paperpro/ink/rasterizer")
 local ReaderOverlay = require("apps/paperpro/overlays/readeroverlay")
 local SelectionService = require("apps/paperpro/services/selectionservice")
 local VocabularyHub = require("apps/paperpro/hubs/vocabularyhub")
@@ -11,6 +21,8 @@ local VocabularyService = require("apps/paperpro/services/vocabularyservice")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
+
+local Screen = Device.screen
 
 local PaperProReader = WidgetContainer:extend{
     name = "PaperProReader",
@@ -33,6 +45,30 @@ function PaperProReader:init()
     self.vocabulary_hub = self.vocabulary_hub or VocabularyHub:new{
         service = self.vocabulary_service,
     }
+    if not self.ink_service then
+        local bounds = (self.ui.dimen or Screen:getSize()):copy()
+        self.ink_renderer = InkRenderer:new{ width = math.max(2, Screen:scaleBySize(2)) }
+        self.ink_canvas = InkCanvas:new{
+            dimen = bounds,
+            renderer = self.ink_renderer,
+            reader_ui = self.ui,
+        }
+        self.ink_anchor = InkAnchor:new{ ui = self.ui, bounds = bounds }
+        self.ink_store = InkStore:new{
+            document_id = self.ui.document.file,
+            doc_settings = self.ui.doc_settings,
+        }
+        self.ink_rasterizer = Rasterizer:new{ renderer = self.ink_renderer }
+        self.ink_service = InkService:new{
+            ui = self.ui,
+            input = Device.input,
+            canvas = self.ink_canvas,
+            anchor = self.ink_anchor,
+            store = self.ink_store,
+            renderer = self.ink_renderer,
+            rasterizer = self.ink_rasterizer,
+        }
+    end
     self.overlay = self.overlay or ReaderOverlay:new{
         on_dismiss = function()
             self:_onOverlayDismissed()
@@ -118,6 +154,7 @@ function PaperProReader:_openExistingNote(item)
 end
 
 function PaperProReader:onShowSelectionActions(selection, is_word_selection)
+    if self.ink_service.active then self.ink_service:deactivate() end
     local snapshot = self.selection_service:createSnapshot(self.ui, selection, {
         is_word_selection = is_word_selection,
     })
@@ -194,6 +231,20 @@ function PaperProReader:onAnnotationsModified()
     self.notes_hub:refreshIfOpen()
 end
 
+function PaperProReader:onPageUpdate()
+    self.ink_service:onLocationChanged()
+end
+
+function PaperProReader:onPosUpdate()
+    self.ink_service:onLocationChanged()
+end
+
+function PaperProReader:onSetDimensions(dimen)
+    self.ink_service:onLocationChanged()
+    self.ink_canvas:setDimensions(dimen)
+    self.ink_anchor.bounds = self.ink_canvas.dimen
+end
+
 function PaperProReader:_applyNoteMarkerPolicy(redraw)
     if not (self.ui.view and self.ui.view.highlight) then return end
     if G_reader_settings:nilOrTrue("paperpro_note_markers") then
@@ -209,7 +260,12 @@ function PaperProReader:onReaderReady()
     self:_applyNoteMarkerPolicy(false)
 end
 
+function PaperProReader:onShow()
+    self.ink_service:attach()
+end
+
 function PaperProReader:openNotesHub()
+    self.ink_service:deactivate()
     self.overlay:dismiss(true)
     self.current_snapshot, self.current_note = nil, nil
     self.ui.highlight:onClose()
@@ -217,6 +273,7 @@ function PaperProReader:openNotesHub()
 end
 
 function PaperProReader:openVocabularyHub()
+    self.ink_service:deactivate()
     self.overlay:dismiss(true)
     self.current_snapshot, self.current_note = nil, nil
     self.ui.highlight:onClose()
@@ -235,6 +292,58 @@ function PaperProReader:addToMainMenu(menu_items)
             {
                 text = _("Vocabulary"),
                 callback = function() self:openVocabularyHub() end,
+                separator = true,
+            },
+            {
+                text = _("Ink Mode"),
+                checked_func = function() return self.ink_service.active end,
+                check_callback_closes_menu = true,
+                callback = function(touchmenu_instance)
+                    local ok, err = self.ink_service:toggle()
+                    if not ok then UIManager:show(InfoMessage:new{ text = err or _("Ink Mode unavailable") }) end
+                    if touchmenu_instance then touchmenu_instance:closeMenu() end
+                    if ok and self.ink_service.active then
+                        UIManager:nextTick(function() self.ink_canvas:refreshStatus() end)
+                    end
+                end,
+            },
+            {
+                text = _("Ink eraser"),
+                enabled_func = function() return self.ink_service.active end,
+                checked_func = function() return self.ink_service.eraser_mode end,
+                callback = function()
+                    self.ink_service:setEraserMode(not self.ink_service.eraser_mode)
+                end,
+            },
+            {
+                text = _("Undo ink"),
+                enabled_func = function() return self.ink_service:canUndo() end,
+                callback = function() self.ink_service:undo() end,
+            },
+            {
+                text = _("Redo ink"),
+                enabled_func = function() return self.ink_service:canRedo() end,
+                callback = function() self.ink_service:redo() end,
+            },
+            {
+                text = _("Delete last ink stroke"),
+                enabled_func = function() return #self.ink_service:getRenderableStrokes() > 0 end,
+                callback = function()
+                    if not self.ink_service:deleteLastVisible() then
+                        UIManager:show(Notification:new{ text = _("No ink on this page") })
+                    end
+                end,
+            },
+            {
+                text = _("Clear ink on this page"),
+                enabled_func = function() return #self.ink_service:getRenderableStrokes() > 0 end,
+                callback = function()
+                    UIManager:show(ConfirmBox:new{
+                        text = _("Clear all ink at this reading location?"),
+                        ok_text = _("Clear"),
+                        ok_callback = function() self.ink_service:clearVisible() end,
+                    })
+                end,
                 separator = true,
             },
             {
@@ -266,6 +375,7 @@ function PaperProReader:onCloseDocument()
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
+    self.ink_service:close()
     self.notes_hub:close()
     self.vocabulary_hub:close()
     self.overlay:dismiss(true)

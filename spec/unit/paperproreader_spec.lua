@@ -1,5 +1,5 @@
 describe("Paper Pro Reader composition", function()
-    local DocumentRegistry, Geom, ReaderUI, Screen, UIManager
+    local DocumentRegistry, Geom, ReaderUI, Screen, Time, UIManager
     local readerui
 
     setup(function()
@@ -9,6 +9,7 @@ describe("Paper Pro Reader composition", function()
         Geom = require("ui/geometry")
         ReaderUI = require("apps/reader/readerui")
         Screen = require("device").screen
+        Time = require("ui/time")
         UIManager = require("ui/uimanager")
         readerui = ReaderUI:new{
             dimen = Screen:getSize(),
@@ -59,6 +60,16 @@ describe("Paper Pro Reader composition", function()
         assert.are.same("tools", menu_items.paperpro_study.sorting_hint)
         assert.are.same("Notes", menu_items.paperpro_study.sub_item_table[1].text)
         assert.are.same("Vocabulary", menu_items.paperpro_study.sub_item_table[2].text)
+        assert.are.same("Ink Mode", menu_items.paperpro_study.sub_item_table[3].text)
+        assert.is_true(menu_items.paperpro_study.sub_item_table[3].check_callback_closes_menu)
+    end)
+
+    it("attaches InkCanvas above ReaderUI on the reader Show event", function()
+        readerui.paperpro.ink_service:close()
+        readerui.paperpro:onShow()
+        assert.is_true(readerui.paperpro.ink_canvas.attached)
+        assert.is_equal(readerui.paperpro.ink_canvas,
+            UIManager._window_stack[#UIManager._window_stack].widget)
     end)
 
     it("uses the existing highlight annotation authority", function()
@@ -176,5 +187,45 @@ describe("Paper Pro Reader composition", function()
         assert.is_true(captured.has_note)
         assert.are.same("Tapped note", captured.annotation.note)
         assert.are.same(readerui.document.file, captured.annotation_ref.document_id)
+    end)
+
+    it("captures, restores, and rasterizes Marker-only ink through Ink Mode", function()
+        local service = readerui.paperpro.ink_service
+        local original_store = service.store
+        service.store = {
+            load = function() return {} end,
+            save = function(self, strokes) self.saved = strokes return true end,
+        }
+        service.strokes, service.undo_stack, service.redo_stack = {}, {}, {}
+        service:_rebuildIndex()
+        service.attached = true
+        service.canvas:attach()
+        assert.is_true(service:activate())
+        local input = require("device").input
+        assert.is_function(input.stylus_callback)
+        input.stylus_callback(input, {
+            slot = input.pen_slot, id = 7, x = 150, y = 200,
+            tool = input.TOOL_TYPE_PEN, timev = Time.s(1), pressure = 20,
+        })
+        input.stylus_callback(input, {
+            slot = input.pen_slot, id = 7, x = 180, y = 220,
+            tool = input.TOOL_TYPE_PEN, timev = Time.s(2), pressure = 30,
+        })
+        input.stylus_callback(input, {
+            slot = input.pen_slot, id = -1, x = 190, y = 230,
+            tool = input.TOOL_TYPE_PEN, timev = Time.s(3), pressure = 0,
+        })
+        assert.are.same(1, #service.strokes)
+        assert.are.same("epub-layout-v1", service.strokes[1].coordinate_space)
+        assert.are.same(20, service.strokes[1].points[1].pressure)
+        assert.are.same(1, #service:getRenderableStrokes())
+        local raster = service:rasterizeVisible()
+        assert.is_truthy(raster)
+        assert.is_true(raster.width < Screen:getWidth())
+        raster.bb:free()
+        service:deactivate()
+        service.strokes = {}
+        service:_rebuildIndex()
+        service.store = original_store
     end)
 end)

@@ -460,7 +460,8 @@ end
 --[[--
 Register a callback for stylus/pen events.
 Called before gesture detection with fully processed slot data.
-The callback receives the Input object and a slot table: {slot, id, x, y, tool, timev}.
+The callback receives the Input object and a slot table:
+{slot, id, x, y, tool, timev, pressure?}.
 Return true from the callback to dominate the event and remove it from gesture detection.
 ]]
 function Input:registerStylusCallback(callback)
@@ -501,6 +502,7 @@ function Input:routeStylusEvents()
 
             logger.dbg("Input:routeStylusEvents: stylus detected in slot", slot.slot,
                        "tool=", slot.tool, "id=", slot.id, "x=", slot.x, "y=", slot.y,
+                       "pressure=", slot.pressure,
                        "pen_slot=", self.pen_slot, "eraser=", self.stylus_eraser_active,
                        "highlighter=", self.stylus_highlighter_active)
             local dominated = self.stylus_callback(self, slot)
@@ -1071,10 +1073,13 @@ function Input:handleTouchEv(ev)
             self:setCurrentMtSlotChecked("x", ev.value)
         elseif ev.code == C.ABS_MT_POSITION_Y or ev.code == C.ABS_Y then
             self:setCurrentMtSlotChecked("y", ev.value)
-        elseif ev.code == self.pressure_event and ev.value == 0 then
-            -- Drop hovering *pen* events
-            if self:getCurrentMtSlotData("tool") == TOOL_TYPE_PEN then
-                self:setCurrentMtSlot("id", -1)
+        elseif ev.code == C.ABS_PRESSURE or ev.code == C.ABS_MT_PRESSURE then
+            self:setCurrentMtSlotChecked("pressure", ev.value)
+            if ev.code == self.pressure_event and ev.value == 0 then
+                -- Drop hovering *pen* events
+                if self:getCurrentMtSlotData("tool") == TOOL_TYPE_PEN then
+                    self:setCurrentMtSlot("id", -1)
+                end
             end
         end
     elseif ev.type == C.EV_SYN then
@@ -1117,6 +1122,11 @@ function Input:handleMixedTouchEv(ev)
         elseif ev.code == C.ABS_Y then
             if self:getCurrentMtSlotData("tool") == TOOL_TYPE_PEN then
                 self:setCurrentMtSlotChecked("y", ev.value)
+            end
+        elseif ev.code == C.ABS_PRESSURE then
+            local tool = self:getCurrentMtSlotData("tool")
+            if tool == TOOL_TYPE_PEN or tool == TOOL_TYPE_ERASER then
+                self:setCurrentMtSlotChecked("pressure", ev.value)
             end
         end
     elseif ev.type == C.EV_SYN then
@@ -1275,6 +1285,7 @@ function Input:handleTouchEvLegacy(ev)
         elseif ev.code == C.ABS_Y then
             self:setCurrentMtSlotChecked("y", ev.value)
         elseif ev.code == C.ABS_PRESSURE then
+            self:setCurrentMtSlotChecked("pressure", ev.value)
             -- This is the least common denominator we can use to detect contact down & lift...
             if ev.value ~= 0 then
                 self:setCurrentMtSlotChecked("id", 1)

@@ -132,10 +132,12 @@ detection. Generated Gesture events reach UIManager and then InputContainer
 touch zones and ReaderUI modules.
 
 The stable callback payload carries slot/contact identity, x/y coordinates,
-tool, and event time. It does not currently retain pressure values. Physical
-`evtest`-level verification is required before choosing the smallest adapter
-change for pressure; Phase 0 does not alter Input or the reMarkable device
-driver.
+tool, event time, and optional pressure. Phase 3 retains `ABS_PRESSURE` in the
+generic slot because QTFB already emits it, but physical Paper Pro pressure
+behavior remains unverified. Tilt, distance, explicit proximity, and button
+state are not exposed in the callback. Ink Mode registers its callback only
+while active and returns `true` for stylus slots, removing them before ordinary
+gesture recognition while leaving touch unchanged.
 
 ## Product-owned layer
 
@@ -160,6 +162,14 @@ frontend/apps/paperpro/
   hubs/
     vocabularyhub.lua        searchable review/detail/passage surface
     noteshub.lua             current-book note review/edit/delete/navigation
+  ink/
+    inkstroke.lua            bounded authoritative raw stroke model
+    inkanchor.lua            strict EPUB layout and PDF page coordinates
+    inkrenderer.lua          vector drawing, bounds, and hit testing
+    inkcanvas.lua            transparent active/persisted ink window
+    inkstore.lua             atomic per-document RapidJSON sidecar
+    inkservice.lua           Ink Mode, input lifecycle, undo/erase/reload
+    rasterizer.lua           bounded derived handwriting bitmap
 ```
 
 ReaderUI remains the functional reader. It registers PaperProReader as one
@@ -167,7 +177,7 @@ module after ReaderDictionary; PaperProReader composes product behavior without
 taking ownership of the document, selection rendering, annotations, or
 dictionary engine. PaperProReader also registers the Study reader-menu entry
 and applies product-owned note-marker and automatic-vocabulary settings. AI
-queue and ink work remain unimplemented.
+queue work remains unimplemented.
 
 ## Future contracts
 
@@ -229,8 +239,9 @@ id, tool, started_at, ended_at, coordinate_space, anchor?
 points = [{ x, y, timestamp, pressure? }]
 ```
 
-Raw strokes are authoritative. A raster image is a derived artifact for
-recognition or AI input.
+This contract is implemented by Phase 3. Raw strokes are authoritative and
+persisted per document. A bounded raster image is a derived local artifact for
+future recognition or AI input; Phase 3 sends it nowhere.
 
 ### AIProvider and OfflineQueue
 

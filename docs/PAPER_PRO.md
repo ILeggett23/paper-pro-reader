@@ -67,10 +67,17 @@ coordinates into screen space. Input reserves a pen slot and invokes a
 registered stylus callback before ordinary gesture recognition, providing the
 lowest-risk future InkService seam.
 
-The callback currently retains x/y, contact id, tool, and event time but not
-pressure. Do not add guessed pressure handling. On hardware, capture the actual
-event capabilities and representative down/move/up frames, then make the
-smallest generic Input adapter change if pressure is emitted and stable.
+The callback retains x/y, contact id, tool, event time, and optional pressure.
+QTFB's Paper Pro translation explicitly emits `ABS_PRESSURE`; Phase 3 preserves
+that existing value in the generic Input slot instead of dropping it. No
+pressure-sensitive brush behavior is enabled because no physical device was
+available to verify range, stability, or meaning. Tilt, distance, explicit
+proximity, and button state are not currently included in the callback.
+
+Ink Mode consumes only events delivered through the stylus callback. Touch
+continues through normal gesture detection. Source-visible eraser tool values
+and the product erase mode both delete whole strokes, but physical Marker
+eraser behavior is unverified.
 
 ## Firmware and installation risks
 
