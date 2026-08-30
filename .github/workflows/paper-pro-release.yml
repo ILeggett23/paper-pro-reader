@@ -96,8 +96,14 @@ jobs:
           name: paper-pro-reader-remarkable-aarch64-${{ github.sha }}
           archive: false
           retention-days: 30
+          path: ${{ steps.package.outputs.artifact }}
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-pro-reader-remarkable-aarch64-${{ github.sha }}-metadata
+          retention-days: 30
           path: |
-            ${{ steps.package.outputs.artifact }}
             ${{ steps.package.outputs.artifact }}.sha256
             paper-pro-release-manifest.json
             paper-pro-package-contents.txt
