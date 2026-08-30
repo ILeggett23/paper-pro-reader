@@ -5,6 +5,9 @@ local AIRequest = require("apps/paperpro/services/airequest")
 local AISettings = require("apps/paperpro/services/aisettings")
 local AnchorNavigator = require("apps/paperpro/services/anchornavigator")
 local ContextResolver = require("apps/paperpro/services/contextresolver")
+local ConversationHub = require("apps/paperpro/hubs/conversationhub")
+local ConversationService = require("apps/paperpro/services/conversationservice")
+local ConversationMarker = require("apps/paperpro/overlays/conversationmarker")
 local ContextualActions = require("apps/paperpro/overlays/contextualactions")
 local DefinitionOverlay = require("apps/paperpro/overlays/definitionoverlay")
 local DefinitionService = require("apps/paperpro/services/definitionservice")
@@ -16,6 +19,7 @@ local InkCanvas = require("apps/paperpro/ink/inkcanvas")
 local InkRenderer = require("apps/paperpro/ink/inkrenderer")
 local InkService = require("apps/paperpro/ink/inkservice")
 local InkStore = require("apps/paperpro/ink/inkstore")
+local InkQuestionSession = require("apps/paperpro/ink/inkquestionsession")
 local NoteOverlay = require("apps/paperpro/overlays/noteoverlay")
 local NotesHub = require("apps/paperpro/hubs/noteshub")
 local Notification = require("ui/widget/notification")
@@ -55,12 +59,41 @@ function PaperProReader:init()
     self.vocabulary_hub = self.vocabulary_hub or VocabularyHub:new{
         service = self.vocabulary_service,
     }
-    self.ai_settings = self.ai_settings or AISettings:new()
+    self.ai_settings = self.ai_settings or AISettings:new{
+        default_input_mode = Device.model == "reMarkable Ferrari" and "write" or "type",
+    }
     self.context_resolver = self.context_resolver or ContextResolver:new()
     self.response_store = self.response_store or ResponseStore:new()
     self.offline_queue = self.offline_queue or OfflineQueue:new()
     self.ai_provider = self.ai_provider or AIProvider:new{ settings = self.ai_settings }
     self.anchor_navigator = self.anchor_navigator or AnchorNavigator:new{ ui = self.ui }
+    self.conversation_service = self.conversation_service or ConversationService:new{
+        responses = self.response_store,
+    }
+    self.conversation_hub = self.conversation_hub or ConversationHub:new{
+        responses = self.response_store, navigator = self.anchor_navigator,
+        on_followup = function(conversation) self:_followupConversation(conversation) end,
+        on_keep_ink = function(conversation, turn)
+            if not self.conversation_marker:_visible(conversation) then
+                UIManager:show(InfoMessage:new{ text = _("Go to the source passage before keeping this handwriting") })
+                return false
+            end
+            local ok, err = self.ink_service:importScreenStrokes(
+                turn.question_ink and turn.question_ink.strokes,
+                conversation.conversation_id)
+            if not ok then
+                UIManager:show(InfoMessage:new{ text = err or _("Could not keep handwriting in book") })
+                return false
+            end
+            self.response_store:markKeptInBook(conversation.conversation_id, turn.request_id)
+            return true
+        end,
+    }
+    self.conversation_marker = self.conversation_marker or ConversationMarker:new{
+        ui = self.ui, responses = self.response_store,
+        dimen = (self.ui.dimen or Screen:getSize()):copy(),
+        on_open = function(id) self.conversation_hub:open(id, false) end,
+    }
     self.quick_ask_overlay = self.quick_ask_overlay or QuickAskOverlay:new()
     self.ai_history = self.ai_history or AIHistory:new{
         queue = self.offline_queue,
@@ -68,6 +101,9 @@ function PaperProReader:init()
         navigator = self.anchor_navigator,
         on_cancel = function(request_id) self:_cancelAIRequest(request_id) end,
         on_retry = function(request_id) self:_retryQueuedAIRequest(request_id) end,
+        on_open_conversation = function(conversation_id)
+            self.conversation_hub:open(conversation_id, false)
+        end,
     }
     if not self.ink_service then
         local bounds = (self.ui.dimen or Screen:getSize()):copy()
@@ -131,25 +167,79 @@ function PaperProReader:_quickAskFactory(model)
             submit = function(question) self:_submitQuickAsk(question) end,
             cancel = function(request_id) self:_cancelAIRequest(request_id) end,
             retry = function(retry_model) self:_retryQuickAsk(retry_model) end,
+            mode = function(mode) self:_setQuickAskMode(mode) end,
+            undo = function() if self.ink_question_session then self.ink_question_session:undo() end end,
+            clear = function() if self.ink_question_session then self.ink_question_session:clear() end end,
+            submit_ink = function() self:_submitInkQuestion() end,
+            followup = function() self:_followupCurrentConversation() end,
+            expand = function() self:_expandCurrentConversation() end,
+            keep_ink = function() self:_keepQuestionInBook() end,
+            toggle_style = function() self:_toggleResponseStyle() end,
+            rewrite = function() self:_setQuickAskMode("write") end,
+            edit_text = function() self:_editRecognizedQuestion() end,
+            ask_anyway = function() self:_askRecognizedQuestion() end,
         })
     end
 end
 
 function PaperProReader:_showQuickAsk(model)
+    if model.state ~= "write" then self:_closeInkQuestionSession() end
     self.current_ai_model = model
     local shown = self.overlay:update(self:_quickAskFactory(model), model)
     if shown and model.state == "compose" and self.overlay.widget.onShowKeyboard then
         self.overlay.widget:onShowKeyboard()
     end
+    if shown and model.state == "write" and not self.ink_question_session then
+        self.ink_question_session = InkQuestionSession:new{
+            ui = self.ui, bounds = self.quick_ask_overlay:writingBounds(),
+        }
+        local ok, err = self.ink_question_session:start()
+        if not ok then
+            self.ink_question_session = nil
+            return self:_showQuickAsk{
+                state = "error", message = err or _("Marker input is unavailable"),
+                question = model.question, source_text = model.source_text,
+                context_mode = model.context_mode, retryable = false,
+            }
+        end
+    end
     return shown
+end
+
+function PaperProReader:_closeInkQuestionSession()
+    if not self.ink_question_session then return false end
+    self.ink_question_session:close()
+    self.ink_question_session = nil
+    return true
+end
+
+function PaperProReader:_setQuickAskMode(mode)
+    self.ai_settings:setInputMode(mode)
+    local model = self.current_ai_model or {}
+    if mode == "write" then
+        self:_closeInkQuestionSession()
+        return self:_showQuickAsk{
+            state = "write", source_text = model.source_text,
+            context_mode = model.context_mode or self.ai_settings:getContextMode(),
+            conversation_id = model.conversation_id or self.active_conversation_id,
+        }
+    end
+    return self:_showQuickAsk{
+        state = "compose", question = model.question or model.recognized_question or "",
+        source_text = model.source_text,
+        context_mode = model.context_mode or self.ai_settings:getContextMode(),
+        conversation_id = model.conversation_id or self.active_conversation_id,
+    }
 end
 
 function PaperProReader:_openQuickAsk()
     local snapshot = self.current_snapshot
     if not snapshot then return false end
     self.active_ai_request = nil
+    self.active_conversation_id = nil
+    local mode = self.ai_settings:getInputMode()
     return self:_showQuickAsk{
-        state = "compose",
+        state = mode == "write" and "write" or "compose",
         question = "",
         source_text = snapshot.text,
         context_mode = self.ai_settings:getContextMode(),
@@ -172,60 +262,120 @@ function PaperProReader:_friendlyAIError(category)
         question_empty = _("Enter a question"),
         question_too_long = _("That question is too long"),
         storage_failure = _("The question could not be saved locally"),
+        ink_empty = _("Write a question first"),
+        image_dimensions = _("The handwritten question is too large"),
+        invalid_image_dimensions = _("The handwritten question dimensions are invalid"),
+        image_too_large = _("The handwritten question image is too large"),
+        invalid_image = _("The handwritten question image is invalid"),
+        model_capability = _("The configured AI model does not support handwriting images"),
     }
     return messages[category] or _("The reading assistant could not answer this question")
 end
 
 function PaperProReader:_submitQuickAsk(question)
     local snapshot = self.current_snapshot
-    if not snapshot then return false end
+    local source_text = snapshot and snapshot.text
+        or self.current_ai_context and self.current_ai_context.selection.text
+    if not source_text then return false end
     if not self.ai_settings:isEnabled() then
         return self:_showQuickAsk{
-            state = "error", question = question, source_text = snapshot.text,
+            state = "error", question = question, source_text = source_text,
             context_mode = self.ai_settings:getContextMode(),
             message = self:_friendlyAIError("disabled"), retryable = false,
         }
     elseif not self.ai_provider:isConfigured() then
         return self:_showQuickAsk{
-            state = "error", question = question, source_text = snapshot.text,
+            state = "error", question = question, source_text = source_text,
             context_mode = self.ai_settings:getContextMode(),
             message = self:_friendlyAIError("not_configured"), retryable = false,
         }
     end
-    local context, context_err = self.context_resolver:resolve(self.ui, snapshot, {
-        context_mode = self.ai_settings:getContextMode(),
-    })
+    local context, context_err
+    if self.current_ai_context then
+        context = SelectionService.deepCopy(self.current_ai_context)
+    else
+        context, context_err = self.context_resolver:resolve(self.ui, snapshot, {
+            context_mode = self.ai_settings:getContextMode(),
+        })
+    end
     if not context then
         return self:_showQuickAsk{
-            state = "compose", question = question, source_text = snapshot.text,
+            state = "compose", question = question, source_text = source_text,
             context_mode = self.ai_settings:getContextMode(),
             message = self:_friendlyAIError(context_err),
         }
     end
-    local request, request_err = AIRequest.create(context, question, {
+    local request_options = self.conversation_service:requestOptions(self.active_conversation_id)
+    local request, request_err = AIRequest.createText(context, question, {
         response_length = "concise", context_mode = context.context_mode,
-    })
+    }, request_options)
     if not request then
         return self:_showQuickAsk{
-            state = "compose", question = question, source_text = snapshot.text,
+            state = "compose", question = question, source_text = source_text,
             context_mode = context.context_mode,
             message = self:_friendlyAIError(request_err),
         }
     end
+    return self:_enqueueAIRequest(request, context)
+end
+
+function PaperProReader:_submitInkQuestion()
+    if not self.ink_question_session then return false end
+    local strokes, stroke_err = self.ink_question_session:submit()
+    if not strokes then
+        UIManager:show(InfoMessage:new{ text = stroke_err == "ink_empty"
+            and _("Write a question first") or _("Could not capture handwriting") })
+        return false
+    end
+    self:_closeInkQuestionSession()
+    local context, context_err
+    if self.current_ai_context then context = SelectionService.deepCopy(self.current_ai_context)
+    elseif self.current_snapshot then
+        context, context_err = self.context_resolver:resolve(self.ui, self.current_snapshot, {
+            context_mode = self.ai_settings:getContextMode(),
+        })
+    end
+    if not context then
+        return self:_showQuickAsk{ state = "error",
+            message = self:_friendlyAIError(context_err), retryable = false }
+    end
+    if not self.ai_settings:isEnabled() or not self.ai_provider:isConfigured() then
+        return self:_showQuickAsk{
+            state = "error", source_text = context.selection.text,
+            context_mode = context.context_mode,
+            message = self:_friendlyAIError(self.ai_settings:isEnabled()
+                and "not_configured" or "disabled"), retryable = false,
+        }
+    end
+    local options = self.conversation_service:requestOptions(self.active_conversation_id)
+    local request, request_err = AIRequest.createInk(context, strokes, {
+        response_length = "concise", context_mode = context.context_mode,
+    }, options)
+    if not request then
+        return self:_showQuickAsk{ state = "error",
+            message = self:_friendlyAIError(request_err), retryable = false }
+    end
+    return self:_enqueueAIRequest(request, context)
+end
+
+function PaperProReader:_enqueueAIRequest(request, context)
     local queued, queue_err = self.offline_queue:enqueue(request)
     if not queued then
         return self:_showQuickAsk{
-            state = "error", question = question, source_text = snapshot.text,
+            state = "error", question = request.question.text,
+            source_text = context.selection.text,
             context_mode = context.context_mode, message = self:_friendlyAIError(queue_err),
             retryable = false,
         }
     end
     self.active_ai_request = request.request_id
+    self.active_conversation_id = request.conversation and request.conversation.id
     if self.ai_provider:isAvailable() then
         self:_showQuickAsk{
             state = "sending", request_id = request.request_id,
             question = request.question.text, source_text = context.selection.text,
-            context_mode = context.context_mode,
+            context_mode = context.context_mode, question_type = request.question.type,
+            conversation_id = self.active_conversation_id,
         }
         self.offline_queue:processBatch(self.ai_provider, self.response_store, {
             preferred_id = request.request_id, max_count = 1,
@@ -234,7 +384,8 @@ function PaperProReader:_submitQuickAsk(question)
         self:_showQuickAsk{
             state = "queued", request_id = request.request_id,
             question = request.question.text, source_text = context.selection.text,
-            context_mode = context.context_mode,
+            context_mode = context.context_mode, question_type = request.question.type,
+            conversation_id = self.active_conversation_id,
             message = _("Saved. I'll answer when you're back online."),
         }
     end
@@ -243,21 +394,33 @@ end
 
 function PaperProReader:_onAIQueueItem(item)
     self.ai_history:refreshIfOpen()
+    self.conversation_marker:refresh()
     if self.document_closed or item.id ~= self.active_ai_request or not self.overlay:isOpen() then
         return
     end
     local request = item.request
+    self.current_ai_context = SelectionService.deepCopy(request.reading_context)
+    self.active_conversation_id = request.conversation and request.conversation.id
     local model = {
         state = item.state,
         request_id = item.id,
         question = request.question.text,
+        question_type = request.question.type,
+        ink_strokes = request.question.local_ink and request.question.local_ink.strokes,
         source_text = request.reading_context.selection.text,
         context_mode = request.preferences.context_mode,
+        conversation_id = request.conversation and request.conversation.id,
+        response_style = self.ai_settings:getResponseStyle(),
     }
     if item.state == "completed" then
         local response = self.response_store:getByRequestId(item.id)
         if not response then return end
-        model.state, model.answer = "success", response.answer
+        model.answer = response.answer
+        model.recognized_question = response.recognized_question
+        model.recognition_status = response.recognition_status
+        model.state = response.clarification_required and "clarification" or "success"
+        model.message = response.clarification_required
+            and _("I couldn't confidently read part of this question.") or nil
     elseif item.state == "failed" then
         model.state = "error"
         model.message = self:_friendlyAIError(item.last_error_category)
@@ -267,6 +430,66 @@ function PaperProReader:_onAIQueueItem(item)
         model.message = _("Saved. I'll answer when you're back online.")
     end
     self:_showQuickAsk(model)
+end
+
+function PaperProReader:_followupConversation(conversation)
+    if not conversation then return false end
+    self.active_conversation_id = conversation.conversation_id
+    self.current_ai_context = SelectionService.deepCopy(conversation.reading_context)
+    return self:_showQuickAsk{
+        state = "compose", question = "", source_text = conversation.source_text,
+        context_mode = conversation.context_mode or self.ai_settings:getContextMode(),
+        conversation_id = conversation.conversation_id,
+    }
+end
+
+function PaperProReader:_followupCurrentConversation()
+    local conversation = self.response_store:getConversation(self.active_conversation_id)
+    return conversation and self:_followupConversation(conversation) or false
+end
+
+function PaperProReader:_expandCurrentConversation()
+    if not self.active_conversation_id then return false end
+    self.overlay:dismiss(true)
+    return self.conversation_hub:open(self.active_conversation_id, false)
+end
+
+function PaperProReader:_toggleResponseStyle()
+    local style = self.ai_settings:getResponseStyle() == "text" and "handwriting" or "text"
+    self.ai_settings:setResponseStyle(style)
+    local model = SelectionService.deepCopy(self.current_ai_model)
+    if not model then return false end
+    model.response_style = style
+    return self:_showQuickAsk(model)
+end
+
+function PaperProReader:_keepQuestionInBook()
+    local model = self.current_ai_model
+    if not (model and model.ink_strokes and model.conversation_id) then return false end
+    local ok, err = self.ink_service:importScreenStrokes(model.ink_strokes, model.conversation_id)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = err or _("Could not keep handwriting in book") })
+        return false
+    end
+    self.response_store:markKeptInBook(model.conversation_id, model.request_id)
+    model.kept_in_book = true
+    self:_showQuickAsk(model)
+    return true
+end
+
+function PaperProReader:_editRecognizedQuestion()
+    local model = self.current_ai_model or {}
+    return self:_showQuickAsk{
+        state = "compose", question = model.recognized_question or "",
+        source_text = model.source_text, context_mode = model.context_mode,
+        conversation_id = model.conversation_id,
+    }
+end
+
+function PaperProReader:_askRecognizedQuestion()
+    local model = self.current_ai_model or {}
+    if not model.recognized_question then return self:_editRecognizedQuestion() end
+    return self:_submitQuickAsk(model.recognized_question)
 end
 
 function PaperProReader:_cancelAIRequest(request_id)
@@ -306,11 +529,13 @@ function PaperProReader:_definitionFactory(model)
 end
 
 function PaperProReader:_onOverlayDismissed()
+    self:_closeInkQuestionSession()
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
     self.current_ai_model = nil
     self.active_ai_request = nil
+    self.current_ai_context = nil
     if self.ui and self.ui.highlight then
         self.ui.highlight:onClose()
     end
@@ -453,16 +678,19 @@ end
 
 function PaperProReader:onPageUpdate()
     self.ink_service:onLocationChanged()
+    self.conversation_marker:refresh()
 end
 
 function PaperProReader:onPosUpdate()
     self.ink_service:onLocationChanged()
+    self.conversation_marker:refresh()
 end
 
 function PaperProReader:onSetDimensions(dimen)
     self.ink_service:onLocationChanged()
     self.ink_canvas:setDimensions(dimen)
     self.ink_anchor.bounds = self.ink_canvas.dimen
+    self.conversation_marker:setDimensions(dimen)
 end
 
 function PaperProReader:_applyNoteMarkerPolicy(redraw)
@@ -481,6 +709,7 @@ function PaperProReader:onReaderReady()
 end
 
 function PaperProReader:onShow()
+    self.conversation_marker:attach()
     self.ink_service:attach()
 end
 
@@ -604,6 +833,28 @@ function PaperProReader:addToMainMenu(menu_items)
                         },
                     },
                     {
+                        text = _("Default question input"),
+                        sub_item_table = {
+                            { text = _("Write"), checked_func = function()
+                                return self.ai_settings:getInputMode() == "write" end,
+                                callback = function() self.ai_settings:setInputMode("write") end },
+                            { text = _("Type"), checked_func = function()
+                                return self.ai_settings:getInputMode() == "type" end,
+                                callback = function() self.ai_settings:setInputMode("type") end },
+                        },
+                    },
+                    {
+                        text = _("AI response style"),
+                        sub_item_table = {
+                            { text = _("Text"), checked_func = function()
+                                return self.ai_settings:getResponseStyle() == "text" end,
+                                callback = function() self.ai_settings:setResponseStyle("text") end },
+                            { text = _("Handwriting"), checked_func = function()
+                                return self.ai_settings:getResponseStyle() == "handwriting" end,
+                                callback = function() self.ai_settings:setResponseStyle("handwriting") end },
+                        },
+                    },
+                    {
                         text = _("Test connection"),
                         enabled_func = function() return self.ai_settings:isConfigured() end,
                         callback = function() self:testAIConnection() end,
@@ -693,6 +944,7 @@ function PaperProReader:onCloseDocument()
     self.active_lookup = nil
     self.current_snapshot = nil
     self.current_note = nil
+    self:_closeInkQuestionSession()
     if self._ai_queue_listener then
         self.offline_queue:removeListener(self._ai_queue_listener)
         self._ai_queue_listener = nil
@@ -701,6 +953,8 @@ function PaperProReader:onCloseDocument()
     self.notes_hub:close()
     self.vocabulary_hub:close()
     self.ai_history:close()
+    self.conversation_hub:close()
+    self.conversation_marker:detach()
     self.overlay:dismiss(true)
 end
 

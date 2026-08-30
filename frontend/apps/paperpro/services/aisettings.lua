@@ -6,6 +6,8 @@ AISettings.KEYS = {
     backend_url = "paperpro_ai_backend_url",
     backend_token = "paperpro_ai_backend_token",
     context_mode = "paperpro_ai_context_mode",
+    response_style = "paperpro_ai_response_style",
+    input_mode = "paperpro_ai_input_mode",
 }
 
 local function trim(value)
@@ -49,12 +51,36 @@ function AISettings:setContextMode(mode)
     return true
 end
 
+function AISettings:getResponseStyle()
+    return self.settings:readSetting(self.KEYS.response_style, "text") == "handwriting"
+        and "handwriting" or "text"
+end
+
+function AISettings:setResponseStyle(style)
+    if style ~= "text" and style ~= "handwriting" then return false end
+    self.settings:saveSetting(self.KEYS.response_style, style)
+    return true
+end
+
+function AISettings:getInputMode()
+    return self.settings:readSetting(self.KEYS.input_mode, self.default_input_mode or "type") == "write"
+        and "write" or "type"
+end
+
+function AISettings:setInputMode(mode)
+    if mode ~= "type" and mode ~= "write" then return false end
+    self.settings:saveSetting(self.KEYS.input_mode, mode)
+    return true
+end
+
 function AISettings:getConfig()
     return {
         enabled = self:isEnabled(),
         backend_url = trim(self.settings:readSetting(self.KEYS.backend_url, "")),
         backend_token = self.settings:readSetting(self.KEYS.backend_token, "") or "",
         context_mode = self:getContextMode(),
+        response_style = self:getResponseStyle(),
+        input_mode = self:getInputMode(),
     }
 end
 

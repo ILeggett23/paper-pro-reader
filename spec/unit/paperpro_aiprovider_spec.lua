@@ -56,6 +56,57 @@ describe("Paper Pro AIProvider and request contract", function()
         assert.are.same("question_too_long", err)
     end)
 
+    it("accepts legacy v1 text requests and creates durable v2 ink requests", function()
+        local text = request()
+        local legacy = require("util").tableDeepCopy(text)
+        legacy.schema_version = 1
+        legacy.conversation = nil
+        assert.is_true(AIRequest.validate(legacy))
+        local stroke = {
+            id = "ink-1", tool = "pen", coordinate_space = "screen-v1",
+            points = {{ x = 10, y = 20, timestamp = 1 }, { x = 50, y = 60, timestamp = 2 }},
+        }
+        local ink = assert(AIRequest.createInk(text.reading_context, { stroke }, nil, {
+            request_id = "ink-request", conversation_id = "conversation-1",
+        }))
+        assert.are.same(2, ink.schema_version)
+        assert.are.same("ink", ink.question.type)
+        assert.are.same("screen-v1", ink.question.local_ink.strokes[1].coordinate_space)
+        assert.are.same("conversation-1", ink.conversation.id)
+    end)
+
+    it("materializes only a bounded PNG for an ink request", function()
+        local text = request()
+        local stroke = { id = "ink-1", tool = "pen", coordinate_space = "screen-v1",
+            points = {{ x = 1, y = 2, timestamp = 1 }, { x = 5, y = 8, timestamp = 2 }} }
+        local ink = assert(AIRequest.createInk(text.reading_context, { stroke }, nil, {
+            request_id = "ink-request", conversation_id = "conversation-1",
+        }))
+        local captured
+        local provider = AIProvider:new{
+            settings = settings(),
+            network_manager = { isOnline = function() return true end },
+            ink_codec = { encode = function() return {
+                mime_type = "image/png", bytes = 24, width = 4, height = 4,
+                data_base64 = "encoded-png",
+            } end },
+            transport = { request = function(_, spec, callback)
+                captured = JSON.decode(spec.body)
+                callback({ ok = true, body = {
+                    request_id = "ink-request", response_id = "ink-response",
+                    status = "completed", answer = "Answer", recognized_question = "Why?",
+                    recognition_status = "clear", clarification_required = false,
+                } })
+                return true
+            end },
+        }
+        local response
+        assert.is_true(provider:submit(ink, function(value) response = value end))
+        assert.is_nil(captured.question.local_ink)
+        assert.are.same("encoded-png", captured.question.image.data_base64)
+        assert.are.same("Why?", response.recognized_question)
+    end)
+
     it("submits provider-neutral JSON while retaining local anchors off wire", function()
         local captured
         local transport = {

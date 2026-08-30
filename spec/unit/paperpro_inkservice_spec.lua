@@ -161,4 +161,20 @@ describe("Paper Pro InkService", function()
         assert.is_false(canvas.attached)
         assert.is_true(store.save_count >= 1)
     end)
+
+    it("keeps an explicit AI question in document ink through the existing authority", function()
+        local service = makeService()
+        local raw = InkStroke:new{
+            id = "question", tool = "pen", coordinate_space = "screen-v1",
+        }
+        raw:addPoint{ x = 20, y = 30, timestamp = 1 }
+        raw:addPoint{ x = 80, y = 60, timestamp = 2 }
+        raw:finish(2)
+        assert.is_true(service:importScreenStrokes({ raw:toTable() }, "conversation-1"))
+        assert.are.same(1, #service.strokes)
+        assert.are.same("ai_question", service.strokes[1].purpose)
+        assert.are.same("conversation-1", service.strokes[1].conversation_id)
+        assert.is_true(service:undo())
+        assert.are.same(0, #service.strokes)
+    end)
 end)

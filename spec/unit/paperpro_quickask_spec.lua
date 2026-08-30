@@ -12,7 +12,8 @@ describe("Paper Pro Quick Ask and AI History surfaces", function()
         local submitted
         local compose = overlay:build({
             state = "compose", source_text = "A passage", context_mode = "nearby",
-        }, nil, function() end, { submit = function(value) submitted = value end })
+        }, nil, function() end, { submit = function(value) submitted = value end,
+            mode = function() end })
         assert.is_truthy(compose.button_table:getButtonById("paperpro_ai_ask"))
         compose:setInputText("My question")
         compose.button_table:getButtonById("paperpro_ai_ask").callback()
@@ -31,6 +32,34 @@ describe("Paper Pro Quick Ask and AI History surfaces", function()
         local failed = overlay:build({ state = "error", retryable = true }, nil,
             function() end, { retry = function() end })
         assert.is_truthy(failed:getButtonById("paperpro_ai_retry"))
+    end)
+
+    it("builds bounded Write, clarification, Keep in book, and handwriting response states", function()
+        local overlay = QuickAskOverlay:new()
+        local writing = overlay:build({ state = "write" }, nil, function() end, {
+            mode = function() end, undo = function() end, clear = function() end,
+            submit_ink = function() end,
+        })
+        assert.is_truthy(writing:getButtonById("paperpro_ai_ink_undo"))
+        assert.is_truthy(writing:getButtonById("paperpro_ai_ink_submit"))
+        local bounds = overlay:writingBounds()
+        assert.is_true(bounds.w <= 1200)
+        assert.is_true(bounds.h <= 512)
+
+        local clarification = overlay:build({ state = "clarification",
+            recognized_question = "Why does ___ matter?" }, nil, function() end, {
+            rewrite = function() end, edit_text = function() end, ask_anyway = function() end,
+        })
+        assert.is_truthy(clarification:getButtonById("paperpro_ai_rewrite"))
+        assert.is_truthy(clarification:getButtonById("paperpro_ai_edit_text"))
+
+        local answer = overlay:build({ state = "success", answer = "Answer",
+            question_type = "ink", response_style = "handwriting" }, nil, function() end, {
+            followup = function() end, expand = function() end,
+            keep_ink = function() end, toggle_style = function() end,
+        })
+        assert.is_truthy(answer:getButtonById("paperpro_ai_keep_ink"))
+        assert.are.same("NotoSerif-Italic.ttf", answer._added_widgets[1].face.realname)
     end)
 
     it("lists completed and queued current-book questions and disables stale anchors", function()

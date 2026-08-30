@@ -17,6 +17,7 @@ function InkCanvas:init()
         w = math.min(96, math.floor(self.dimen.w * 0.2)),
         h = math.min(42, math.floor(self.dimen.h * 0.07)),
     }
+    self.show_status = self.show_status ~= false
 end
 
 function InkCanvas:setService(service)
@@ -54,7 +55,7 @@ function InkCanvas:isPointAllowed(point)
         and point.x < self.dimen.x + self.dimen.w
         and point.y < self.dimen.y + self.dimen.h
     if not inside_canvas then return false end
-    return not (point.x >= self.status_bounds.x and point.y >= self.status_bounds.y
+    return not self.show_status or not (point.x >= self.status_bounds.x and point.y >= self.status_bounds.y
         and point.x < self.status_bounds.x + self.status_bounds.w
         and point.y < self.status_bounds.y + self.status_bounds.h)
 end
@@ -77,7 +78,7 @@ function InkCanvas:_statusWidget()
 end
 
 function InkCanvas:_paintStatus(bb, x, y)
-    if not self.ink_mode then return end
+    if not self.ink_mode or not self.show_status then return end
     local bounds = self.status_bounds
     bb:paintRect(x + bounds.x, y + bounds.y, bounds.w, bounds.h, Blitbuffer.COLOR_WHITE)
     bb:paintBorder(x + bounds.x, y + bounds.y, bounds.w, bounds.h, 2, Blitbuffer.COLOR_BLACK)
@@ -108,15 +109,15 @@ function InkCanvas:setInkMode(enabled, eraser_mode)
     self.ink_mode = enabled and true or false
     self.eraser_mode = eraser_mode and true or false
     self.paint_segment = nil
-    if self.ink_mode then
+    if self.ink_mode and self.show_status then
         self.ui_manager:setDirty(self, "ui", previous_bounds)
-    elseif self.reader_ui then
+    elseif self.show_status and self.reader_ui then
         self.ui_manager:setDirty(self.reader_ui.dialog, "partial", previous_bounds)
     end
 end
 
 function InkCanvas:refreshStatus()
-    if self.ink_mode then self.ui_manager:setDirty(self, "ui", self.status_bounds) end
+    if self.ink_mode and self.show_status then self.ui_manager:setDirty(self, "ui", self.status_bounds) end
 end
 
 function InkCanvas:setActiveStroke(stroke)

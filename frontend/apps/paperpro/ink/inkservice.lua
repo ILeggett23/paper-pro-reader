@@ -21,7 +21,7 @@ function InkService:new(options)
     options.undo_stack = {}
     options.redo_stack = {}
     options.sequence = 0
-    options.purpose = "document_annotation"
+    options.purpose = options.purpose or "document_annotation"
     local service = setmetatable(options, self)
     service.canvas:setService(service)
     return service
@@ -336,6 +336,29 @@ end
 function InkService:rasterizeVisible()
     if not self.rasterizer then return nil, "rasterizer_unavailable" end
     return self.rasterizer:rasterize(self:getRenderableStrokes())
+end
+
+function InkService:importScreenStrokes(strokes, conversation_id)
+    local records = {}
+    for _, source in ipairs(strokes or {}) do
+        local raw, raw_err = InkStroke.fromTable(source.toTable and source:toTable() or source)
+        if not raw or raw.coordinate_space ~= "screen-v1" then return false, raw_err or "invalid_stroke" end
+        raw.id = self:_nextId(raw.started_at or os.time())
+        local stored, err = self.anchor:finalizeStroke(raw)
+        if not stored then return false, err end
+        stored.purpose = "ai_question"
+        stored.conversation_id = conversation_id
+        table.insert(self.strokes, stored)
+        table.insert(records, { stroke = stored, index = #self.strokes })
+    end
+    if #records == 0 then return false, "empty" end
+    self:_rebuildIndex()
+    self:_pushOperation({ kind = "add", records = records })
+    self:_persist()
+    for _, record in ipairs(records) do
+        self.canvas:requestFinalStroke(self.anchor:projectStroke(record.stroke))
+    end
+    return true, records
 end
 
 function InkService:onLocationChanged()

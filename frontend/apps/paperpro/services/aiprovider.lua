@@ -1,5 +1,6 @@
 local AIRequest = require("apps/paperpro/services/airequest")
 local HTTPTransport = require("apps/paperpro/services/httptransport")
+local InkQuestionCodec = require("apps/paperpro/ink/inkquestioncodec")
 local JSON = require("rapidjson")
 local NetworkMgr = require("ui/network/manager")
 local SelectionService = require("apps/paperpro/services/selectionservice")
@@ -7,7 +8,7 @@ local SelectionService = require("apps/paperpro/services/selectionservice")
 local AIProvider = {}
 AIProvider.__index = AIProvider
 
-AIProvider.PROTOCOL_VERSION = 1
+AIProvider.PROTOCOL_VERSION = 2
 AIProvider.MAX_ANSWER_BYTES = 32768
 
 local function callbackFor(callbacks)
@@ -23,6 +24,7 @@ function AIProvider:new(options)
     options = options or {}
     assert(options.settings, "AIProvider requires AISettings")
     options.transport = options.transport or HTTPTransport:new()
+    options.ink_codec = options.ink_codec or InkQuestionCodec:new()
     options.network_manager = options.network_manager or NetworkMgr
     options.inflight = {}
     return setmetatable(options, self)
@@ -72,6 +74,16 @@ function AIProvider:submit(request, callbacks)
     -- model context. Keep them in the queue/response stores but off the wire.
     outbound.reading_context.book.document_id = nil
     outbound.reading_context.location.anchor = nil
+    if outbound.question.type == "ink" then
+        local image, image_err = self.ink_codec:encode(
+            outbound.question.local_ink and outbound.question.local_ink.strokes)
+        if not image then
+            callback(nil, { category = image_err or "image_encode", retryable = false })
+            return false, image_err
+        end
+        outbound.question.local_ink = nil
+        outbound.question.image = image
+    end
     local body, encode_err = JSON.encode(outbound)
     if not body then
         callback(nil, { category = "serialization", retryable = false })
@@ -93,11 +105,22 @@ function AIProvider:submit(request, callbacks)
         end
         local response = result.body
         if type(response) ~= "table" or response.request_id ~= request.request_id
-                or response.status ~= "completed" or type(response.response_id) ~= "string"
+                or (response.status ~= "completed" and response.status ~= "clarification_required")
+                or type(response.response_id) ~= "string"
                 or type(response.answer) ~= "string" or response.answer == ""
                 or #response.answer > self.MAX_ANSWER_BYTES then
             callback(nil, { category = "malformed_response", retryable = false })
             return
+        end
+        if request.question.type == "ink" then
+            local allowed = { clear = true, uncertain = true, unreadable = true }
+            if not allowed[response.recognition_status]
+                    or (response.recognized_question ~= nil
+                        and type(response.recognized_question) ~= "string")
+                    or type(response.clarification_required) ~= "boolean" then
+                callback(nil, { category = "malformed_response", retryable = false })
+                return
+            end
         end
         callback(response)
     end)
