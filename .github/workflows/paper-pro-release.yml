@@ -1,5 +1,9 @@
 name: paper-pro-release-candidate
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [phase-6-paperpro-qualification]
