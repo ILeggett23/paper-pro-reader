@@ -61,6 +61,7 @@ describe("Paper Pro Reader composition", function()
         assert.are.same("Notes", menu_items.paperpro_study.sub_item_table[1].text)
         assert.are.same("Vocabulary", menu_items.paperpro_study.sub_item_table[2].text)
         assert.are.same("Ink Mode", menu_items.paperpro_study.sub_item_table[3].text)
+        assert.is_true(menu_items.paperpro_study.sub_item_table[3].check_callback_closes_menu)
     end)
 
     it("uses the existing highlight annotation authority", function()

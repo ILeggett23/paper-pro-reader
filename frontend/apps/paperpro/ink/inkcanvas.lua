@@ -114,6 +114,10 @@ function InkCanvas:setInkMode(enabled, eraser_mode)
     end
 end
 
+function InkCanvas:refreshStatus()
+    if self.ink_mode then self.ui_manager:setDirty(self, "ui", self.status_bounds) end
+end
+
 function InkCanvas:setActiveStroke(stroke)
     self.active_stroke = stroke
 end

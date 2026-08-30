@@ -294,9 +294,14 @@ function PaperProReader:addToMainMenu(menu_items)
             {
                 text = _("Ink Mode"),
                 checked_func = function() return self.ink_service.active end,
-                callback = function()
+                check_callback_closes_menu = true,
+                callback = function(touchmenu_instance)
                     local ok, err = self.ink_service:toggle()
                     if not ok then UIManager:show(InfoMessage:new{ text = err or _("Ink Mode unavailable") }) end
+                    if touchmenu_instance then touchmenu_instance:closeMenu() end
+                    if ok and self.ink_service.active then
+                        UIManager:nextTick(function() self.ink_canvas:refreshStatus() end)
+                    end
                 end,
             },
             {
