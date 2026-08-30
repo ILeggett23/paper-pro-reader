@@ -24,14 +24,23 @@ function DefinitionOverlay:_body(model)
 
     local definitions = {}
     for _, definition in ipairs(model.definitions or {}) do
-        table.insert(definitions, definition.text)
+        local source = definition.dictionary_name and definition.dictionary_name ~= ""
+            and ("\n" .. _("Source: ") .. definition.dictionary_name) or ""
+        table.insert(definitions, definition.text .. source)
     end
     local body = table.concat(definitions, "\n\n")
-    if model.dictionary_name and model.dictionary_name ~= "" then
-        body = body .. "\n\n" .. _("Dictionary: ") .. model.dictionary_name
-    end
     if model.is_phrase then
         body = body .. "\n\n" .. _("Phrase lookup uses the selected text as-is.")
+    end
+    local vocabulary_status = {
+        added = _("✓ Added to Vocabulary"),
+        already = _("Already in Vocabulary"),
+        saving = _("Saving to Vocabulary…"),
+        unavailable = _("Vocabulary is unavailable"),
+        error = _("Could not save to Vocabulary"),
+    }
+    if model.vocabulary_status and vocabulary_status[model.vocabulary_status] then
+        body = body .. "\n\n" .. vocabulary_status[model.vocabulary_status]
     end
     return body
 end

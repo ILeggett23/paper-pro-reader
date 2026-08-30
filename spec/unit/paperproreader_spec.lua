@@ -21,6 +21,8 @@ describe("Paper Pro Reader composition", function()
     end)
 
     before_each(function()
+        G_reader_settings:saveSetting("paperpro_auto_add_vocabulary", true)
+        G_reader_settings:saveSetting("paperpro_note_markers", true)
         UIManager:show(readerui)
         readerui.rolling:onGotoPage(10)
     end)
@@ -50,6 +52,14 @@ describe("Paper Pro Reader composition", function()
         assert.is_false(dialog:getButtonById("paperpro_ask_ai").enabled)
     end)
 
+    it("registers a compact Study menu for both hubs", function()
+        local menu_items = {}
+        readerui.paperpro:addToMainMenu(menu_items)
+        assert.are.same("Study", menu_items.paperpro_study.text)
+        assert.are.same("Notes", menu_items.paperpro_study.sub_item_table[1].text)
+        assert.are.same("Vocabulary", menu_items.paperpro_study.sub_item_table[2].text)
+    end)
+
     it("uses the existing highlight annotation authority", function()
         selectWord()
         assert.is_true(readerui.paperpro:performAction("highlight"))
@@ -57,12 +67,24 @@ describe("Paper Pro Reader composition", function()
         assert.is_truthy(readerui.annotation.annotations[1].text)
     end)
 
-    it("delegates Note to ReaderHighlight", function()
+    it("opens NoteOverlay and saves one authoritative annotation in place", function()
         selectWord()
-        stub(readerui.highlight, "addNote")
+        local page_before = readerui:getCurrentPage()
         assert.is_true(readerui.paperpro:performAction("note"))
-        assert.stub(readerui.highlight.addNote).was.called_with(match.is_ref(readerui.highlight))
-        readerui.highlight.addNote:revert()
+        assert.is_truthy(readerui.paperpro.overlay.widget:getButtonById("paperpro_note_save"))
+        assert.are.same(0, #readerui.annotation.annotations)
+        assert.is_true(readerui.paperpro:_saveNote("A contextual note."))
+        assert.are.same(1, #readerui.annotation.annotations)
+        assert.are.same("A contextual note.", readerui.annotation.annotations[1].note)
+        assert.are.same(page_before, readerui:getCurrentPage())
+        assert.are.same("sidemark", readerui.view.highlight.note_mark)
+    end)
+
+    it("cancels NoteOverlay without creating an annotation", function()
+        selectWord()
+        assert.is_true(readerui.paperpro:performAction("note"))
+        readerui.paperpro.overlay:dismiss()
+        assert.are.same(0, #readerui.annotation.annotations)
     end)
 
     it("shows normalized definition results without changing location", function()
@@ -85,5 +107,70 @@ describe("Paper Pro Reader composition", function()
         readerui.paperpro.overlay:dismiss()
         assert.are.same(page_before, readerui:getCurrentPage())
         readerui.dictionary.lookupWordResults = original_lookup
+    end)
+
+    it("updates DefinitionOverlay only after vocabulary persistence succeeds", function()
+        selectWord()
+        local original_lookup = readerui.dictionary.lookupWordResults
+        local original_record = readerui.paperpro.vocabulary_service.recordDefinition
+        readerui.dictionary.lookupWordResults = function(_, query, _, callback)
+            callback(query, {
+                { word = query, dict = "First", definition = "One." },
+                { word = query, dict = "Second", definition = "Two." },
+            })
+            return true
+        end
+        readerui.paperpro.vocabulary_service.recordDefinition = function(_, snapshot, model, callback)
+            assert.is_truthy(snapshot.selected_word)
+            assert.are.same("Second", model.definitions[2].dictionary_name)
+            callback("added")
+            return true
+        end
+
+        assert.is_true(readerui.paperpro:performAction("define"))
+        assert.are.same("added", readerui.paperpro.overlay.model.vocabulary_status)
+
+        readerui.dictionary.lookupWordResults = original_lookup
+        readerui.paperpro.vocabulary_service.recordDefinition = original_record
+    end)
+
+    it("opens an existing note in the product editor", function()
+        selectWord()
+        readerui.paperpro:performAction("note")
+        readerui.paperpro:_saveNote("Existing note")
+        local annotation = readerui.annotation.annotations[1]
+        local payload = {
+            annotation = require("util").tableDeepCopy(annotation),
+            annotation_ref = readerui.paperpro.annotation_service:referenceFor(annotation),
+            screen_boxes = {}, has_note = true,
+        }
+        assert.is_true(readerui.paperpro:onShowAnnotationNote(payload))
+        assert.is_true(readerui.paperpro.current_note.is_edit)
+        assert.are.same("Existing note", readerui.paperpro.current_note.note)
+    end)
+
+    it("emits a detached product event when a saved note is tapped", function()
+        selectWord()
+        readerui.paperpro:performAction("note")
+        readerui.paperpro:_saveNote("Tapped note")
+        readerui.view.highlight.visible_boxes = {{
+            index = 1,
+            rect = Geom:new{ x = -10000, y = -10000, w = 20000, h = 20000 },
+        }}
+        local captured
+        local original_handle_event = readerui.handleEvent
+        readerui.handleEvent = function(self, event)
+            if event.handler == "onShowAnnotationNote" then
+                captured = event.args[1]
+                return true
+            end
+            return original_handle_event(self, event)
+        end
+
+        assert.is_true(readerui.highlight:onTap(nil, { pos = Geom:new{ x = 1, y = 1 } }))
+        readerui.handleEvent = original_handle_event
+        assert.is_true(captured.has_note)
+        assert.are.same("Tapped note", captured.annotation.note)
+        assert.are.same(readerui.document.file, captured.annotation_ref.document_id)
     end)
 end)

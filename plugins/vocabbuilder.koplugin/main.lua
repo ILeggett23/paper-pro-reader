@@ -2152,4 +2152,33 @@ function VocabBuilder:onWordLookedUp(word, title, is_manual)
     return true
 end
 
+-- Presentation-neutral rich definition seam. Unlike WordLookedUp, this only
+-- enriches metadata and never changes an existing row's review schedule.
+function VocabBuilder:onDefinitionResolved(entry, callback)
+    local ok, result = pcall(DB.enrichDefinition, DB, entry)
+    if not ok then
+        logger.err("Vocabulary rich definition persistence failed:", result)
+    end
+    if callback then
+        if ok then callback(result) else callback(nil, result) end
+    end
+    return true
+end
+
+function VocabBuilder:onGetVocabularyItems(search_text, callback)
+    local ok, items = pcall(DB.selectRichItems, DB, search_text)
+    if callback then
+        if ok then callback(items) else callback(nil, items) end
+    end
+    return true
+end
+
+function VocabBuilder:onGetVocabularyItem(word, callback)
+    local ok, item = pcall(DB.hasWord, DB, word)
+    if callback then
+        if ok then callback(item) else callback(nil, item) end
+    end
+    return true
+end
+
 return VocabBuilder

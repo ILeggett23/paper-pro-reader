@@ -1,8 +1,9 @@
 describe("Paper Pro DefinitionService", function()
-    local DefinitionService
+    local DefinitionOverlay, DefinitionService
 
     setup(function()
         require("commonrequire")
+        DefinitionOverlay = require("apps/paperpro/overlays/definitionoverlay")
         DefinitionService = require("apps/paperpro/services/definitionservice")
     end)
 
@@ -51,6 +52,19 @@ describe("Paper Pro DefinitionService", function()
         assert.are.same("success", model.status)
         assert.are.same(2, #model.definitions)
         assert.are.same("First", model.dictionary_name)
+    end)
+
+    it("attributes every definition and shows persisted vocabulary status", function()
+        local body = DefinitionOverlay:new():_body{
+            status = "success", vocabulary_status = "added",
+            definitions = {
+                { text = "Move quickly.", dictionary_name = "First" },
+                { text = "An act of running.", dictionary_name = "Second" },
+            },
+        }
+        assert.is_truthy(body:find("First", 1, true))
+        assert.is_truthy(body:find("Second", 1, true))
+        assert.is_truthy(body:find("Added to Vocabulary", 1, true))
     end)
 
     it("normalizes dictionary failures", function()
