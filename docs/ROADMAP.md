@@ -43,8 +43,17 @@ Add handwritten-question recognition, text or handwriting-styled responses,
 expanded conversation/full-study states, and a complete library/study visual
 system using complete-line or completed-response e-ink updates.
 
-Implementation status: complete on `phase-5-book-writes-back`, pending review
-and merge into `main`.
+Implementation status: complete and merged into `main` by pull request #5.
+
+## Phase 6 — Release candidate and physical qualification
+
+Produce an identified Paper Pro aarch64 RC, persistent paid-request
+idempotency, safe diagnostics, installation/rollback guidance, and a structured
+user-driven hardware qualification loop.
+
+Stage A status: complete on `phase-6-paperpro-qualification`, pending CI,
+review, and user Stage B installation. Phase 6 remains open until the physical
+report is reviewed.
 
 The next phase should focus only on physical Paper Pro qualification and
 product polish: real Marker/refresh/latency evidence, shared backend

@@ -163,6 +163,7 @@ frontend/apps/paperpro/
     responsestore.lua        local completed exchange authority
     anchornavigator.lua      validated ReaderLink/rolling/paging adapter
     conversationservice.lua  bounded local canonical conversation history
+    diagnostics.lua          safe RC/device/queue lifecycle evidence
   overlays/
     placement.lua            resolution-aware pure placement policy
     readeroverlay.lua        reusable bounded widget host/lifecycle
@@ -299,3 +300,11 @@ migrates Phase 4 exchanges into single-turn conversations and owns bounded
 follow-ups, recognition text, anchors, and optional retained question ink.
 The backend performs one multimodal response with qualitative recognition and
 continues using `store: false` with no tools or web search.
+
+Phase 6 adds release identity and opt-in diagnostics without changing engine
+or device adapters. The backend production entrypoint uses a restart-safe
+atomic idempotency file containing only completed response envelopes, request
+IDs, and expiry metadata; prompts, images, book context, and credentials are
+not retained. Linux CI builds the native `remarkable-aarch64` archive in
+KOReader's supported cross-toolchain image and validates ELF architecture,
+manifests, product modules, permissions, contents, secrets, and checksum.
