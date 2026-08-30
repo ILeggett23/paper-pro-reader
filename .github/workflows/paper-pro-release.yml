@@ -15,6 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
     container: koreader/koremarkable:2.1.0-22.04
     env:
+      BASH_ENV: /home/ko/.bashrc
       MAKEFLAGS: OUTPUT_DIR=build-remarkable INSTALL_DIR=install-remarkable TARGET=remarkable-aarch64 PARALLEL_JOBS=4
       RC_VERSION: 0.6.0-rc1
     steps:
@@ -31,6 +32,12 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --force --no-tags https://github.com/koreader/koreader.git refs/tags/v2026.07.1:refs/tags/v2026.07.1
           make fetchthirdparty
+
+      - name: Verify official cross-toolchain
+        run: |
+          command -v aarch64-remarkable-linux-gnu-gcc
+          command -v aarch64-remarkable-linux-gnu-g++
+          aarch64-remarkable-linux-gnu-gcc --version
 
       - name: Build native remarkable-aarch64 release
         run: ./kodev release --ignore-translation remarkable-aarch64 txz
