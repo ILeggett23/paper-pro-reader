@@ -1,6 +1,7 @@
 local AnchorCodec = require("apps/paperpro/services/anchorcodec")
 local Event = require("ui/event")
 local JSON = require("json")
+local decodeJSON = JSON.decode.getDecoder{ nothrow = true }
 
 local VocabularyService = {}
 VocabularyService.__index = VocabularyService
@@ -34,8 +35,7 @@ function VocabularyService:recordDefinition(snapshot, model, callback)
     local ok, definitions_json = pcall(JSON.encode, model.definitions)
     local normalized_definitions
     if ok then
-        local decoded, value = pcall(JSON.decode, definitions_json)
-        if decoded then normalized_definitions = value end
+        normalized_definitions = decodeJSON(definitions_json)
     end
     local discovery_time = os.time()
     local entry = {
@@ -72,8 +72,8 @@ function VocabularyService:decodeItem(item)
     if not item then return nil end
     item.anchor = AnchorCodec.fromColumns(item)
     if item.definitions_json then
-        local ok, definitions = pcall(JSON.decode, item.definitions_json)
-        if ok then item.definitions = definitions end
+        local definitions = decodeJSON(item.definitions_json)
+        if type(definitions) == "table" then item.definitions = definitions end
     end
     return item
 end

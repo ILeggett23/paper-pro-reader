@@ -4,6 +4,7 @@ local JSON = require("json")
 local SQ3 = require("lua-ljsqlite3/init")
 local LuaData = require("luadata")
 local logger = require("logger")
+local decodeJSON = JSON.decode.getDecoder{ nothrow = true }
 
 local db_location = DataStorage:getSettingsDir() .. "/vocabulary_builder.sqlite3"
 
@@ -595,8 +596,8 @@ function VocabularyBuilder.onSync(local_path, cached_path, income_path)
             "UPDATE vocabulary SET definitions_json = NULL WHERE rowid = ?;")
         local function decodedTable(value)
             if not value or value == "" then return nil end
-            local decoded, result = pcall(JSON.decode, value)
-            return decoded and type(result) == "table" and result or nil
+            local result = decodeJSON(value)
+            return type(result) == "table" and result or nil
         end
         for i, rowid in ipairs(rich_rows.rich_rowid) do
             local definitions_json = rich_rows.definitions_json[i]

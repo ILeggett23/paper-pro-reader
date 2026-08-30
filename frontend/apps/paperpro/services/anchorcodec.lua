@@ -1,4 +1,5 @@
 local JSON = require("json")
+local decodeJSON = JSON.decode.getDecoder{ nothrow = true }
 
 local AnchorCodec = {}
 
@@ -10,8 +11,8 @@ end
 
 local function decode(value)
     if not value or value == "" then return nil end
-    local ok, result = pcall(JSON.decode, value)
-    return ok and type(result) == "table" and result or nil
+    local result = decodeJSON(value)
+    return type(result) == "table" and result or nil
 end
 
 function AnchorCodec.toColumns(anchor)
