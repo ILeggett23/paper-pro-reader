@@ -2071,6 +2071,13 @@ function ReaderHighlight:onHoldRelease()
     end
 
     if self.selected_text then
+        -- Give alternate reader surfaces a generic opportunity to handle a
+        -- stable copy of the selection. If no module consumes the event, keep
+        -- all existing KOReader selection behavior as the fallback.
+        local selection = util.tableDeepCopy(self.selected_text)
+        if self.ui:handleEvent(Event:new("ShowSelectionActions", selection, self.is_word_selection)) then
+            return true
+        end
         if self.is_word_selection then
             self:lookupDictWord()
         else
