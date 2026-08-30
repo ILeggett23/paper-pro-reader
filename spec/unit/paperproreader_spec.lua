@@ -61,7 +61,7 @@ describe("Paper Pro Reader composition", function()
         selectWord()
         stub(readerui.highlight, "addNote")
         assert.is_true(readerui.paperpro:performAction("note"))
-        assert.stub(readerui.highlight.addNote).was_called_with(match.is_ref(readerui.highlight))
+        assert.stub(readerui.highlight.addNote).was.called_with(match.is_ref(readerui.highlight))
         readerui.highlight.addNote:revert()
     end)
 
