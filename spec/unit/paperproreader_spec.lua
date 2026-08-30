@@ -56,6 +56,7 @@ describe("Paper Pro Reader composition", function()
         local menu_items = {}
         readerui.paperpro:addToMainMenu(menu_items)
         assert.are.same("Study", menu_items.paperpro_study.text)
+        assert.are.same("tools", menu_items.paperpro_study.sorting_hint)
         assert.are.same("Notes", menu_items.paperpro_study.sub_item_table[1].text)
         assert.are.same("Vocabulary", menu_items.paperpro_study.sub_item_table[2].text)
     end)

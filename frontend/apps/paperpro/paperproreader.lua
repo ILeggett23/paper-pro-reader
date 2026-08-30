@@ -226,6 +226,7 @@ end
 function PaperProReader:addToMainMenu(menu_items)
     menu_items.paperpro_study = {
         text = _("Study"),
+        sorting_hint = "tools",
         sub_item_table = {
             {
                 text = _("Notes"),
