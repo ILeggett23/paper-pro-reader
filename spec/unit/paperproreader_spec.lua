@@ -167,8 +167,10 @@ describe("Paper Pro Reader composition", function()
             return original_handle_event(self, event)
         end
 
-        assert.is_true(readerui.highlight:onTap(nil, { pos = Geom:new{ x = 1, y = 1 } }))
+        local handled = readerui.highlight:onTap(nil, { pos = Geom:new{ x = 1, y = 1 } })
         readerui.handleEvent = original_handle_event
+        readerui.view.highlight.visible_boxes = {}
+        assert.is_true(handled)
         assert.is_true(captured.has_note)
         assert.are.same("Tapped note", captured.annotation.note)
         assert.are.same(readerui.document.file, captured.annotation_ref.document_id)

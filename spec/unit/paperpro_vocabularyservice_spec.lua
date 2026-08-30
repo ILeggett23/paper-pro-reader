@@ -62,6 +62,9 @@ describe("Paper Pro VocabularyService", function()
         assert.is_false(service:recordDefinition(snapshot("broken"), {
             status = "error", definitions = {},
         }, function() end))
+        assert.is_false(service:recordDefinition(snapshot("blank"), {
+            status = "success", definitions = {{ text = "   " }},
+        }, function() end))
         assert.are.same(0, calls)
     end)
 

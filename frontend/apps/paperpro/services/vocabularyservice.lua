@@ -10,14 +10,23 @@ function VocabularyService:new(options)
 end
 
 local function authorText(author)
-    if type(author) == "table" then return table.concat(author, ", ") end
-    return author
+    if type(author) == "table" then
+        local authors = {}
+        for _, value in ipairs(author) do
+            if type(value) == "string" and value ~= "" then table.insert(authors, value) end
+        end
+        return #authors > 0 and table.concat(authors, ", ") or nil
+    end
+    return type(author) == "string" and author or nil
 end
 
 function VocabularyService:recordDefinition(snapshot, model, callback)
     callback = callback or function() end
-    if not (snapshot and snapshot.selected_word and model and model.status == "success"
-            and model.definitions and model.definitions[1] and model.definitions[1].text ~= "") then
+    if not (snapshot and type(snapshot.selected_word) == "string"
+            and snapshot.selected_word:match("%S") and model and model.status == "success"
+            and model.definitions and model.definitions[1]
+            and type(model.definitions[1].text) == "string"
+            and model.definitions[1].text:match("%S")) then
         callback("ineligible")
         return false
     end
