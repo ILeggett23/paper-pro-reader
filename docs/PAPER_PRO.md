@@ -79,6 +79,15 @@ continues through normal gesture detection. Source-visible eraser tool values
 and the product erase mode both delete whole strokes, but physical Marker
 eraser behavior is unverified.
 
+RC1 physical testing exposed a product-window routing failure above this input
+pipeline: the always-attached ink canvas was the top UIManager window, so
+already-detected finger gestures never reached ReaderUI. RC2 keeps the canvas
+paint-only through UIManager's pass-through window contract and makes the
+conversation marker forward gestures outside its small target. The evdev node,
+coordinate transform, QTFB manifest, Input handler, and stylus callback are
+unchanged. Optional diagnostics record only `touch_route` state and gesture
+mode, never coordinates or reading content.
+
 ## Firmware and installation risks
 
 - reMarkable OS updates can change input-node numbering, QTFB compatibility,

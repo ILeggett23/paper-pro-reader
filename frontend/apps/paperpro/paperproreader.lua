@@ -135,6 +135,9 @@ function PaperProReader:init()
         ai_settings = self.ai_settings, queue = self.offline_queue,
         ink_service = self.ink_service,
     }
+    self.conversation_marker.on_touch_route = function(state, mode)
+        self.diagnostics:record("touch_route", { state = state, mode = mode })
+    end
     self.overlay = self.overlay or ReaderOverlay:new{
         on_dismiss = function()
             self:_onOverlayDismissed()

@@ -75,6 +75,7 @@ function Diagnostics:snapshot()
         ai_backend_configured = self.ai_settings and self.ai_settings:isConfigured() or false,
         ink_mode = self.ink_service and self.ink_service.active or false,
         stylus_callback_registered = Device.input.stylus_callback ~= nil,
+        touch_routing = "product-overlay-passthrough-v2",
         queue_states = queue_states,
         diagnostic_log = self.path,
     }

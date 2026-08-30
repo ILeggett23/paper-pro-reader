@@ -24,6 +24,15 @@ describe("Paper Pro InkCanvas", function()
         bb:free()
     end)
 
+    it("is a paint-only window that cannot block finger gestures", function()
+        local canvas = InkCanvas:new{
+            dimen = Geom:new{ x = 0, y = 0, w = 320, h = 480 },
+            renderer = InkRenderer:new(),
+            ui_manager = { show = function() end, close = function() end, setDirty = function() end },
+        }
+        assert.is_true(canvas.toast)
+    end)
+
     it("excludes its status badge while keeping a resolution-aware drawing surface", function()
         local canvas = InkCanvas:new{
             dimen = Geom:new{ x = 0, y = 0, w = 1620, h = 2160 },

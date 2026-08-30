@@ -308,3 +308,10 @@ IDs, and expiry metadata; prompts, images, book context, and credentials are
 not retained. Linux CI builds the native `remarkable-aarch64` archive in
 KOReader's supported cross-toolchain image and validates ELF architecture,
 manifests, product modules, permissions, contents, secrets, and checksum.
+
+RC2 corrects a product-layer gesture routing error found on physical OS
+3.27.3.0 hardware. Passive ink remains a paint-only top-level surface, and the
+small conversation marker explicitly returns unmatched gestures to ReaderUI.
+This preserves the existing evdev -> Input -> gesture detector pipeline and
+does not change Paper Pro node selection, coordinates, QTFB, UIManager, or
+stylus filtering.

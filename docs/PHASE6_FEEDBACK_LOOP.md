@@ -1,6 +1,6 @@
 # Phase 6 hardware feedback loop
 
-Phase 6 remains open after RC1 Stage A. Every returned finding is classified:
+Phase 6 remains open through RC2 physical qualification. Every returned finding is classified:
 
 - `INSTALL`
 - `CRASH`
@@ -34,3 +34,15 @@ For each failure:
 Vague symptoms do not justify broad rewrites. Ask for the diagnostic excerpt,
 exact last action, repeatability, orientation, document type, Wi-Fi state, and
 whether the stock UI recovered.
+
+## RC1 finding 001
+
+- Classification: `INPUT`
+- Device: reMarkable Paper Pro, OS 3.27.3.0
+- Result: launch/render PASS; all finger taps, swipes, and links FAIL
+- Recovery: `/home/root/xovi/stock` restored working stock touch
+- Narrowest layer: product-owned top-level ink/AI marker windows prevented
+  UIManager from dispatching gestures to ReaderUI
+- RC2 action: paint-only ink input pass-through, unmatched marker gesture
+  forwarding, safe `touch_route` diagnostics, and focused UIManager regression
+- Status: RC2 PHYSICAL RETEST REQUIRED

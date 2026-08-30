@@ -2,7 +2,7 @@
 
 ## Stage A
 
-RC identity: `0.6.0-rc1` / Phase 6 RC1.
+Current RC identity: `0.6.0-rc2` / Phase 6 RC2.
 
 Stage A provides:
 
@@ -15,6 +15,12 @@ Stage A provides:
 - restart-safe file idempotency retaining only completed responses;
 - installation, upgrade, rollback, uninstall, backend, first-boot, A/B,
   qualification, report, and feedback-loop guides.
+
+RC1 launched and rendered the Quickstart Guide on a Paper Pro running OS
+3.27.3.0, but every finger tap and swipe was blocked. Source reproduction
+identified two product-owned paint windows above ReaderUI. RC2 makes the ink
+canvas input-passive and forwards gestures outside the AI conversation marker
+to ReaderUI. No device, evdev, QTFB, framebuffer, or engine file changes.
 
 The package contains the native KOReader aarch64 launcher, resources, pinned
 libraries, Paper Pro product modules, `koreader.sh`, QTFB/AppLoad manifests,
@@ -32,6 +38,7 @@ Study > Diagnostics can enable a bounded JSON-lines log and view a report with:
 - AI enabled/configured state;
 - queue-state counts;
 - Ink Mode and stylus-callback state.
+- RC2 product-overlay touch-routing identity.
 
 Logged lifecycle fields are restricted to event, request ID, state, error
 category, points, bounds, mode, and duration. Keys, tokens, URLs, book text,
@@ -49,10 +56,10 @@ scp root@<PAPER_PRO_IP>:/home/root/xovi/exthome/appload/koreader/settings/paperp
 
 ## Stage B
 
-Stage B begins when the user installs RC1 and returns
+Stage B continues when the user upgrades to RC2 and returns
 `PAPER_PRO_TEST_REPORT_TEMPLATE.md`. No physical qualification row becomes
 PASS before that explicit evidence. Failures enter the controlled process in
 `PHASE6_FEEDBACK_LOOP.md`, produce an identified RC2/RC3, and retain previous
 artifacts and checksums.
 
-Current state: **PHYSICAL PAPER PRO VALIDATION PENDING USER TEST**.
+Current state: **BLOCKED — RC1 TOUCH INPUT FAILURE; RC2 PHYSICAL RETEST REQUIRED**.

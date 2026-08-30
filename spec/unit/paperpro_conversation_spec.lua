@@ -48,4 +48,32 @@ describe("Paper Pro conversation surfaces", function()
         marker:setDimensions(Geom:new{ x = 0, y = 0, w = 1620, h = 2160 })
         assert.are.same(1556, marker.bounds.x)
     end)
+
+    it("consumes its marker tap and forwards unmatched reader gestures", function()
+        local forwarded
+        local opened
+        local marker = ConversationMarker:new{
+            dimen = Geom:new{ x = 0, y = 0, w = 600, h = 800 },
+            responses = { listConversationsForDocument = function() return {} end },
+            ui = {
+                handleEvent = function(_, event) forwarded = event; return true end,
+                document = { file = "book.pdf" }, view = {},
+            },
+            on_open = function(id) opened = id end,
+        }
+        marker.currentConversation = function() return { conversation_id = "c1" } end
+
+        assert.is_true(marker:onGesture{
+            ges = "tap", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        })
+        assert.are.same("onGesture", forwarded.handler)
+        assert.are.same("tap", forwarded.args[1].ges)
+
+        forwarded = nil
+        assert.is_true(marker:onGesture{
+            ges = "tap", pos = Geom:new{ x = 550, y = 70, w = 0, h = 0 },
+        })
+        assert.are.same("c1", opened)
+        assert.is_nil(forwarded)
+    end)
 end)

@@ -1,11 +1,12 @@
 describe("Paper Pro Reader composition", function()
-    local DocumentRegistry, Geom, ReaderUI, Screen, Time, UIManager
+    local DocumentRegistry, Event, Geom, ReaderUI, Screen, Time, UIManager
     local readerui
 
     setup(function()
         require("commonrequire")
         disable_plugins()
         DocumentRegistry = require("document/documentregistry")
+        Event = require("ui/event")
         Geom = require("ui/geometry")
         ReaderUI = require("apps/reader/readerui")
         Screen = require("device").screen
@@ -85,12 +86,31 @@ describe("Paper Pro Reader composition", function()
         assert.is_true(menu_items.paperpro_study.sub_item_table[6].check_callback_closes_menu)
     end)
 
-    it("attaches InkCanvas above ReaderUI on the reader Show event", function()
+    it("attaches a pass-through InkCanvas above ReaderUI on the reader Show event", function()
         readerui.paperpro.ink_service:close()
         readerui.paperpro:onShow()
         assert.is_true(readerui.paperpro.ink_canvas.attached)
+        assert.is_true(readerui.paperpro.ink_canvas.toast)
         assert.is_equal(readerui.paperpro.ink_canvas,
             UIManager._window_stack[#UIManager._window_stack].widget)
+    end)
+
+    it("routes a real UIManager gesture through product surfaces to ReaderUI", function()
+        local forwarded
+        local original_handle = readerui.handleEvent
+        readerui.handleEvent = function(_, event)
+            forwarded = event
+            return true
+        end
+
+        UIManager:sendEvent(Event:new("Gesture", {
+            ges = "tap", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        }))
+        readerui.handleEvent = original_handle
+
+        assert.is_truthy(forwarded)
+        assert.are.same("onGesture", forwarded.handler)
+        assert.are.same("tap", forwarded.args[1].ges)
     end)
 
     it("uses the existing highlight annotation authority", function()

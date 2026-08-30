@@ -6,7 +6,13 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
-local InkCanvas = WidgetContainer:extend{}
+local InkCanvas = WidgetContainer:extend{
+    -- Ink is a paint-only surface. UIManager's toast contract keeps it in the
+    -- paint stack while allowing finger gestures to reach the active reader or
+    -- dialog below it. Marker events are consumed earlier by InkService's
+    -- stylus callback while Ink Mode is active.
+    toast = true,
+}
 
 function InkCanvas:init()
     self.ui_manager = self.ui_manager or UIManager
