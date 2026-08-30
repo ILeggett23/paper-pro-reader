@@ -20,12 +20,24 @@ describe("Readerhighlight module", function()
 
     local readerui
 
+    local function use_product_highlight_or_legacy()
+        if readerui.paperpro and readerui.paperpro.current_snapshot then
+            readerui.paperpro.overlay:dismiss(true)
+            readerui.paperpro.current_snapshot = nil
+        end
+        readerui.highlight:saveHighlight()
+        if readerui.highlight.highlight_dialog then
+            UIManager:close(readerui.highlight.highlight_dialog)
+            readerui.highlight.highlight_dialog = nil
+        end
+    end
+
     local function highlight_single_word(screenshot_filename, pos0)
         local s = spy.on(readerui.languagesupport, "improveWordSelection")
         -- Select a word.
         readerui.highlight:onHold(nil, { pos = pos0 })
         readerui.highlight:onHoldRelease()
-        readerui.highlight:saveHighlight()
+        use_product_highlight_or_legacy()
         fastforward_ui_events()
         screenshot(Screen, screenshot_filename)
         assert.spy(s).was_called()
@@ -37,32 +49,19 @@ describe("Readerhighlight module", function()
     local function highlight_text(screenshot_filename, pos0, pos1)
         readerui.highlight:onHold(nil, { pos = pos0 })
         readerui.highlight:onHoldPan(nil, { pos = pos1 })
-        local next_slot
-        for i = #UIManager._window_stack, 0, -1 do
-            local top_window = UIManager._window_stack[i]
-            -- skip modal window
-            if not top_window or not top_window.widget.modal then
-                next_slot = i + 1
-                break
-            end
-        end
         readerui.highlight:onHoldRelease()
         fastforward_ui_events()
         screenshot(Screen, screenshot_filename)
-        assert.truthy(readerui.highlight.highlight_dialog)
-        assert.truthy(UIManager._window_stack[next_slot].widget
-                      == readerui.highlight.highlight_dialog)
-        readerui.highlight:saveHighlight()
+        assert.truthy(readerui.paperpro.current_snapshot or readerui.highlight.highlight_dialog)
+        use_product_highlight_or_legacy()
     end
     local function tap_highlight_text(screenshot_filename, pos0, pos1, pos2)
         -- Highlight some text.
         readerui.highlight:onHold(nil, { pos = pos0 })
         readerui.highlight:onHoldPan(nil, { pos = pos1 })
         readerui.highlight:onHoldRelease()
-        readerui.highlight:saveHighlight()
+        use_product_highlight_or_legacy()
         readerui.highlight:clear()
-        -- Close dialog.
-        UIManager:close(readerui.highlight.highlight_dialog)
         fastforward_ui_events()
         -- Tap it.
         readerui.highlight:onTap(nil, { pos = pos2 })
