@@ -41,7 +41,7 @@ jobs:
       - name: Install static-analysis tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y luarocks shellcheck
+          sudo apt-get install -y luarocks shellcheck shfmt
           sudo luarocks install luacheck
 
       - name: Record source environment
@@ -63,7 +63,16 @@ jobs:
       - name: Static checks
         run: |
           set -o pipefail
-          ./kodev check 2>&1 | tee phase6n1b-source-output/kodev-check.txt
+          ./base/utils/shellcheck.sh \
+            tools/paperpro-secret-scan.sh \
+            tools/phase6n1/build-poc.sh 2>&1 \
+            | tee phase6n1b-source-output/shell-static.txt
+          luacheck -q \
+            frontend/apps/paperpro/ink/nativebridge.lua \
+            frontend/apps/paperpro/ink/inkservice.lua \
+            spec/unit/paperpro_nativebridge_spec.lua \
+            spec/unit/paperpro_inkservice_spec.lua 2>&1 \
+            | tee phase6n1b-source-output/lua-static.txt
           PYTHONPYCACHEPREFIX=/tmp/phase6n1b-pycache \
             python3 -m py_compile tools/phase6n1/compare_metrics.py
           python3 tools/phase6n1/compare_metrics.py \
