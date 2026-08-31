@@ -394,7 +394,9 @@ jobs:
             command -v aarch64-remarkable-linux-gnu-g++
             aarch64-remarkable-linux-gnu-gcc --version
             aarch64-remarkable-linux-gnu-g++ --version
-            env | grep -E '^(CC|CXX|OECORE_|SDKTARGETSYSROOT|TARGET_PREFIX)='
+            if ! env | grep -E '^(CC|CXX|OECORE_|SDKTARGETSYSROOT|TARGET_PREFIX)='; then
+              printf 'sdk_environment_exports=none (standalone crosstool-NG)\n'
+            fi
             readelf --version | head -n 1
           } | tee phase6n1b-koreader-output/target-environment.txt
           ./kodev release --ignore-translation remarkable-aarch64 txz 2>&1 \
