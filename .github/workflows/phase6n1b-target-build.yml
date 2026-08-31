@@ -24,7 +24,8 @@ env:
   XOVI_COMMIT: 0c8d5269b55c851901d4e4a754dc2d7deab40b17
   READER_POC: 47ae810160a00c97bb9b13f2af5a67ab2d7dd2d1
   READER_ROLLBACK: 8ae4353409e8c5569c9d1fba3176fb0318517c6e
-  APPLOAD_IMAGE: eeems/remarkable-toolchain@sha256:315826e2548ba65bc69bcb486278dbacd8fccc14422180eae40e23d806a36124
+  APPLOAD_SDK_TAG: 5.7.119-rmpp
+  APPLOAD_IMAGE: eeems/remarkable-toolchain@sha256:0bfdc764a17636aa8261696431caaa96a04d95ef18e9a17ac6db084026d24676
   KOREADER_IMAGE: koreader/koremarkable@sha256:587457c7c63381905439ceef550dd4cd8148f427da4c21a9ede345d7099ab7ee
 
 jobs:
@@ -87,7 +88,7 @@ jobs:
     name: AppLoad v0.5.3 native-ink AArch64
     runs-on: ubuntu-22.04
     container:
-      image: eeems/remarkable-toolchain@sha256:315826e2548ba65bc69bcb486278dbacd8fccc14422180eae40e23d806a36124
+      image: eeems/remarkable-toolchain@sha256:0bfdc764a17636aa8261696431caaa96a04d95ef18e9a17ac6db084026d24676
     steps:
       - uses: actions/checkout@v6
         with:
@@ -165,6 +166,7 @@ jobs:
           source "$sdk_env"
           {
             printf 'container=%s\n' "$APPLOAD_IMAGE"
+            printf 'sdk_tag=%s\n' "$APPLOAD_SDK_TAG"
             printf 'sdk_environment=%s\n' "$sdk_env"
             printf 'appload_base=%s\n' "$APPLOAD_BASE"
             printf 'appload_poc=%s\n' "$APPLOAD_POC"
@@ -262,6 +264,7 @@ jobs:
               'appload_poc': os.environ['APPLOAD_POC'],
               'appload_tree': os.environ['APPLOAD_TREE'],
               'xovi_commit': os.environ['XOVI_COMMIT'],
+              'sdk_tag': os.environ['APPLOAD_SDK_TAG'],
               'container': os.environ['APPLOAD_IMAGE'],
               'device_target': 'reMarkable Ferrari / OS 3.27.3.0',
               'installation_authorized': False,
