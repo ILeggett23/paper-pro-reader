@@ -1,0 +1,1 @@
+backend,run_id,contact_to_visible_ms,settle_ms,raw_samples,rendered_samples,handed_samples,dropped_samples,display_updates,coalesced_updates,missing_segments,quality_flashes_during_contact,safe_exit,persistence_handoff

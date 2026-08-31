@@ -424,7 +424,7 @@ function InkService:_beginEraserGesture()
     self.eraser_region = nil
 end
 
-function InkService:_eraseGestureAt(point)
+function InkService:_eraseGestureAt(point, defer_refresh)
     if not self.eraser_contact then self:_beginEraserGesture() end
     local removed = false
     for index = #self.strokes, 1, -1 do
@@ -441,7 +441,7 @@ function InkService:_eraseGestureAt(point)
                 if region then
                     self.eraser_region = self.eraser_region
                         and self.eraser_region:combine(region) or region:copy()
-                    self:_requestLiveRestore(region)
+                    if not defer_refresh then self:_requestLiveRestore(region) end
                 end
                 removed = true
             end
@@ -450,7 +450,7 @@ function InkService:_eraseGestureAt(point)
     return removed
 end
 
-function InkService:_finishEraserGesture()
+function InkService:_finishEraserGesture(defer_refresh)
     if not self.eraser_contact then return false end
     self.eraser_contact = false
     local records = self.eraser_records or {}
@@ -460,7 +460,11 @@ function InkService:_finishEraserGesture()
     if #records == 0 then return false end
     table.sort(records, function(left, right) return left.index < right.index end)
     self:_pushOperation({ kind = "delete", records = records })
-    self:_markDirty(region)
+    if defer_refresh then
+        self.store_dirty = true
+    else
+        self:_markDirty(region)
+    end
     return true
 end
 
@@ -519,6 +523,75 @@ function InkService:importScreenStrokes(strokes, conversation_id)
     end
     self:_markDirty(region)
     return true, records
+end
+
+function InkService:importNativeStroke(native_stroke)
+    self:attach()
+    if type(native_stroke) ~= "table" or type(native_stroke.id) ~= "string"
+            or type(native_stroke.points) ~= "table" or #native_stroke.points == 0 then
+        return false, "invalid_native_stroke"
+    end
+    if #native_stroke.points > InkStroke.MAX_POINTS then return false, "limit" end
+    for _, existing in ipairs(self.strokes) do
+        if existing.id == native_stroke.id then return true, existing end
+    end
+    if #self.strokes >= self.max_strokes then return false, "stroke_limit" end
+
+    local active = InkStroke:new{
+        id = native_stroke.id,
+        tool = "pen",
+        started_at = native_stroke.started_at,
+        coordinate_space = "screen-v1",
+    }
+    for _, point in ipairs(native_stroke.points) do
+        local added, err = active:addPoint({
+            x = point.x,
+            y = point.y,
+            timestamp = point.timestamp,
+            pressure = point.pressure,
+        }, self.canvas:getDrawingBounds())
+        if not added and err ~= "duplicate" then return false, err end
+    end
+    if #active.points == 0 then return false, "empty" end
+    active:finish(native_stroke.ended_at)
+    local stored, anchor_err = self.anchor:finalizeStroke(active)
+    if not stored then return false, anchor_err end
+
+    table.insert(self.strokes, stored)
+    self:_indexStroke(stored)
+    self:_pushOperation({ kind = "add", records = {{ stroke = stored, index = #self.strokes }} })
+    self.store_dirty = true
+    local ok, persist_err = self:_persist()
+    if not ok then return false, persist_err end
+    self:_metric("native_stroke_points_persisted", #active.points)
+    return true, stored
+end
+
+function InkService:beginNativeErase()
+    self:attach()
+    if self.native_erase_active then return true end
+    self:_beginEraserGesture()
+    self.native_erase_active = true
+    return true
+end
+
+function InkService:nativeEraseAt(point)
+    if not self.native_erase_active then self:beginNativeErase() end
+    if type(point) ~= "table" or type(point.x) ~= "number" or type(point.y) ~= "number" then
+        return false, "invalid_native_erase_point"
+    end
+    return self:_eraseGestureAt(point, true)
+end
+
+function InkService:finishNativeErase()
+    if not self.native_erase_active then return false end
+    self.native_erase_active = false
+    local changed = self:_finishEraserGesture(true)
+    if not changed then return false end
+    self.store_dirty = true
+    local ok = self:_persist()
+    if ok then self:_metric("native_erase_transactions_persisted") end
+    return ok
 end
 
 function InkService:onLocationChanged()

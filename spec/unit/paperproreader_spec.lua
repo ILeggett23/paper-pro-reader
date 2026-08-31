@@ -32,6 +32,7 @@ describe("Paper Pro Reader composition", function()
     end)
 
     after_each(function()
+        readerui.paperpro.native_ink_enabled = false
         readerui.paperpro:onCloseDocument()
         readerui.highlight:clear()
         readerui.annotation.annotations = {}
@@ -86,6 +87,23 @@ describe("Paper Pro Reader composition", function()
         assert.are.same("Write Mode", menu_items.paperpro_study.sub_item_table[6].text)
         assert.is_true(menu_items.paperpro_study.sub_item_table[6].check_callback_closes_menu)
         assert.are.same("Palm rejection", menu_items.paperpro_study.sub_item_table[7].text)
+    end)
+
+    it("removes visible Write Mode controls when native ink is automatic", function()
+        readerui.paperpro.native_ink_enabled = true
+        local menu_items = {}
+        readerui.paperpro:addToMainMenu(menu_items)
+        local labels = {}
+        for _, item in ipairs(menu_items.paperpro_study.sub_item_table) do
+            labels[item.text] = true
+        end
+        assert.is_nil(labels["Write Mode"])
+        assert.is_nil(labels["Palm rejection"])
+        assert.is_nil(labels["Ink eraser"])
+        local ok, err = readerui.paperpro:enterWriteMode()
+        assert.is_false(ok)
+        assert.are.same("Native ink is automatic", err)
+        readerui.paperpro.native_ink_enabled = false
     end)
 
     it("keeps InkCanvas below the gesture-forwarding marker in Read Mode", function()

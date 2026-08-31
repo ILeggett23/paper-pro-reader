@@ -20,6 +20,7 @@ local InkCanvas = require("apps/paperpro/ink/inkcanvas")
 local InkRenderer = require("apps/paperpro/ink/inkrenderer")
 local InkService = require("apps/paperpro/ink/inkservice")
 local InkStore = require("apps/paperpro/ink/inkstore")
+local NativeBridge = require("apps/paperpro/ink/nativebridge")
 local WriteToolbar = require("apps/paperpro/ink/writetoolbar")
 local InkQuestionSession = require("apps/paperpro/ink/inkquestionsession")
 local NoteOverlay = require("apps/paperpro/overlays/noteoverlay")
@@ -66,6 +67,8 @@ function PaperProReader:_isReaderSurfaceActive()
 end
 
 function PaperProReader:init()
+    self.native_ink_enabled = Device.model == "reMarkable Ferrari"
+        and os.getenv("KO_NATIVE_INK") == "1"
     self.selection_service = self.selection_service or SelectionService:new()
     self.definition_service = self.definition_service or DefinitionService:new{
         dictionary = self.ui.dictionary,
@@ -138,6 +141,7 @@ function PaperProReader:init()
             toast = false,
             is_reader_surface_active = function() return self:_isReaderSurfaceActive() end,
         }
+        if self.native_ink_enabled then self.ink_canvas.show_status = false end
         self.ink_anchor = InkAnchor:new{ ui = self.ui, bounds = bounds }
         self.ink_store = InkStore:new{
             document_id = self.ui.document.file,
@@ -193,6 +197,12 @@ function PaperProReader:init()
     self.ink_canvas.metric = metric
     self.ink_service.metric = metric
     self.write_toolbar.metric = metric
+    if self.native_ink_enabled and not self.native_bridge then
+        self.native_bridge = NativeBridge:new{
+            ink_service = self.ink_service,
+            metric = metric,
+        }
+    end
     self.overlay = self.overlay or ReaderOverlay:new{
         on_dismiss = function()
             self:_onOverlayDismissed()
@@ -685,6 +695,7 @@ function PaperProReader:_setWriteInteractionMode(mode)
 end
 
 function PaperProReader:enterWriteMode()
+    if self.native_ink_enabled then return false, "Native ink is automatic" end
     local ok, err = self.ink_service:activate()
     if not ok then return false, err end
     self.write_toolbar:setPolicy(
@@ -821,6 +832,7 @@ end
 
 function PaperProReader:onReaderReady()
     self:_applyNoteMarkerPolicy(false)
+    if self.native_bridge then self.native_bridge:start() end
 end
 
 function PaperProReader:onShow()
@@ -895,9 +907,13 @@ end
 
 function PaperProReader:showDiagnostics()
     local viewer
+    local report = self.diagnostics:report()
+    if self.native_bridge then
+        report = report .. "\n\nNative ink bridge\n" .. self.native_bridge:report()
+    end
     viewer = TextViewer:new{
         title = _("Paper Pro diagnostics"),
-        text = self.diagnostics:report(),
+        text = report,
         buttons_table = {{
             { text = _("Close"), callback = function() UIManager:close(viewer) end },
         }},
@@ -1138,6 +1154,18 @@ function PaperProReader:addToMainMenu(menu_items)
             },
         },
     }
+    if self.native_ink_enabled then
+        local hidden = {
+            [_('Write Mode')] = true,
+            [_('Palm rejection')] = true,
+            [_('Ink eraser')] = true,
+        }
+        local filtered = {}
+        for _, item in ipairs(menu_items.paperpro_study.sub_item_table) do
+            if not hidden[item.text] then table.insert(filtered, item) end
+        end
+        menu_items.paperpro_study.sub_item_table = filtered
+    end
 end
 
 function PaperProReader:onCloseDocument()
@@ -1152,6 +1180,7 @@ function PaperProReader:onCloseDocument()
         self._ai_queue_listener = nil
     end
     self.write_toolbar:detach()
+    if self.native_bridge then self.native_bridge:close() end
     self.ink_service:close()
     self.notes_hub:close()
     self.vocabulary_hub:close()

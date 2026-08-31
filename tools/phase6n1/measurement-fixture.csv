@@ -1,0 +1,4 @@
+backend,run_id,contact_to_visible_ms,settle_ms,raw_samples,rendered_samples,handed_samples,dropped_samples,display_updates,coalesced_updates,missing_segments,quality_flashes_during_contact,safe_exit,persistence_handoff
+stock,fixture-1,20,80,100,100,100,0,40,60,0,0,yes,yes
+stock,fixture-2,24,90,100,100,100,0,42,58,0,0,yes,yes
+native-poc,fixture-1,25,95,100,100,100,0,35,65,0,0,yes,yes

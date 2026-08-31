@@ -221,4 +221,41 @@ describe("Paper Pro InkService", function()
         assert.is_true(service:undo())
         assert.are.same(0, #service.strokes)
     end)
+
+    it("persists completed native strokes without scheduling a live repaint", function()
+        local service, _, canvas, store = makeService()
+        local ok = service:importNativeStroke{
+            id = "native-1-1", started_at = 1, ended_at = 2,
+            points = {
+                { x = 10, y = 20, timestamp = 1, pressure = 100 },
+                { x = 30, y = 40, timestamp = 2, pressure = 200 },
+            },
+        }
+        assert.is_true(ok)
+        assert.are.same(1, #service.strokes)
+        assert.are.same(2, #service.strokes[1].points)
+        assert.are.same(1, store.save_count)
+        assert.are.same(0, #canvas.segments)
+        assert.are.same(0, #canvas.finals)
+        assert.are.same(0, #canvas.cleanups)
+    end)
+
+    it("groups native rear-eraser points without per-point KOReader repaint", function()
+        local service, _, canvas, store = makeService()
+        assert.is_true(service:importNativeStroke{
+            id = "native-1-1", started_at = 1, ended_at = 2,
+            points = {
+                { x = 10, y = 10, timestamp = 1 },
+                { x = 50, y = 10, timestamp = 2 },
+            },
+        })
+        assert.is_true(service:beginNativeErase())
+        assert.is_true(service:nativeEraseAt{ x = 30, y = 12 })
+        assert.is_true(service:finishNativeErase())
+        assert.are.same(0, #service.strokes)
+        assert.are.same(2, store.save_count)
+        assert.are.same(0, #canvas.restores)
+        assert.are.same(0, #canvas.cleanups)
+        assert.are.same("delete", service.undo_stack[#service.undo_stack].kind)
+    end)
 end)

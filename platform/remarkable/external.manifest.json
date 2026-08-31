@@ -2,7 +2,10 @@
   "name": "KOReader",
   "application": "koreader.sh",
   "environment": {
-    "KO_USE_QTFB": "1"
+    "KO_USE_QTFB": "1",
+    "KO_NATIVE_INK": "1"
   },
-  "qtfb": true
+  "qtfb": true,
+  "nativeInk": true,
+  "disablesWindowedMode": true
 }
