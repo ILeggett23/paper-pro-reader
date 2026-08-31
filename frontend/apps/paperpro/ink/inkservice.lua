@@ -54,6 +54,11 @@ function InkService:_markDirty(region)
     self:_scheduleIdle()
 end
 
+function InkService:_requestQualityCleanup(region)
+    if self.canvas.requestQualityCleanup then return self.canvas:requestQualityCleanup(region) end
+    return self.canvas:restoreRegion(region)
+end
+
 function InkService:_flushIdle()
     self.idle_scheduled = false
     if self.active_stroke or self.eraser_contact then
@@ -61,7 +66,7 @@ function InkService:_flushIdle()
         return false
     end
     if self.writing_region then
-        self.canvas:requestQualityCleanup(self.writing_region)
+        self:_requestQualityCleanup(self.writing_region)
         self.writing_region = nil
     end
     if self.store_dirty then return self:_persist() end
@@ -526,7 +531,7 @@ function InkService:flush()
     self:_finishEraserGesture()
     self:_cancelIdle()
     if self.writing_region then
-        self.canvas:requestQualityCleanup(self.writing_region)
+        self:_requestQualityCleanup(self.writing_region)
         self.writing_region = nil
     end
     if self.store_dirty then return self:_persist() end
