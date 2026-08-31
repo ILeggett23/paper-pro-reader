@@ -226,7 +226,12 @@ function InkService:_finishActive(timestamp)
     self:_indexStroke(stored)
     self:_pushOperation({ kind = "add", records = {{ stroke = stored, index = #self.strokes }} })
     local projected = self.anchor:projectStroke(stored) or active
-    local region = self.canvas:finishActiveStroke(projected)
+    local region
+    if self.canvas.finishActiveStroke then
+        region = self.canvas:finishActiveStroke(projected)
+    else
+        region = self.canvas:requestFinalStroke(projected)
+    end
     self:_markDirty(region)
     return true, stored
 end
@@ -288,6 +293,7 @@ function InkService:invalidateVisibleCache()
 end
 
 function InkService:_indexStroke(stroke)
+    self.stroke_index = self.stroke_index or {}
     local key = self.anchor:key(stroke)
     if key then
         self.stroke_index[key] = self.stroke_index[key] or {}

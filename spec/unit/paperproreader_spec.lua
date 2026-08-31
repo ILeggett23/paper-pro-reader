@@ -119,6 +119,7 @@ describe("Paper Pro Reader composition", function()
     it("blocks single-finger page gestures in strict Write Mode", function()
         local forwarded
         local original_handle = readerui.handleEvent
+        G_reader_settings:saveSetting("paperpro_palm_rejection_policy", "strict")
         readerui.handleEvent = function(_, event)
             forwarded = event
             return true
