@@ -19,9 +19,9 @@ mkdir -p "${artifact_dir}"
 
 cd "${repo_dir}"
 ./kodev test front \
-    paperpro_nativebridge_spec.lua \
-    paperpro_inkservice_spec.lua \
-    paperproreader_spec.lua
+    paperpro_nativebridge \
+    paperpro_inkservice \
+    paperproreader
 ./kodev test front
 ./kodev release --ignore-translation remarkable-aarch64 txz
 

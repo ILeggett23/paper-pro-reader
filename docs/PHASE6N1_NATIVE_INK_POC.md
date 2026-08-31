@@ -63,9 +63,9 @@ and grouped-erase entry points. This keeps the POC above protected engine code.
 Focused specs:
 
 ```sh
-./kodev test front paperpro_nativebridge_spec.lua
-./kodev test front paperpro_inkservice_spec.lua
-./kodev test front paperproreader_spec.lua
+./kodev test front paperpro_nativebridge
+./kodev test front paperpro_inkservice
+./kodev test front paperproreader
 ```
 
 Then run `./kodev test front`. Package and physical gates remain separate.

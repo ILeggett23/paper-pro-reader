@@ -365,9 +365,9 @@ jobs:
         run: |
           set -o pipefail
           ./kodev test front \
-            paperpro_nativebridge_spec.lua \
-            paperpro_inkservice_spec.lua \
-            paperproreader_spec.lua 2>&1 \
+            paperpro_nativebridge \
+            paperpro_inkservice \
+            paperproreader 2>&1 \
             | tee phase6n1b-koreader-logs/focused-tests.txt
 
       - name: Complete frontend regression suite
