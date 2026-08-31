@@ -113,6 +113,28 @@ describe("Paper Pro InkCanvas", function()
         assert.are.same(0, #canvas.paint_segments)
     end)
 
+    it("allows only one live presentation outstanding while retaining new samples", function()
+        local scheduled = {}
+        local dirty = 0
+        local canvas = InkCanvas:new{
+            dimen = Geom:new{ x = 0, y = 0, w = 320, h = 480 },
+            renderer = InkRenderer:new(),
+            ui_manager = {
+                show = function() end, close = function() end,
+                scheduleIn = function(_, _, task) table.insert(scheduled, task) end,
+                unschedule = function() end,
+                setDirty = function() dirty = dirty + 1 end,
+            },
+        }
+        canvas:requestActiveSegment({ x = 10, y = 10 }, { x = 20, y = 10 })
+        scheduled[1]()
+        assert.is_true(canvas.presentation_outstanding)
+        canvas:requestActiveSegment({ x = 20, y = 10 }, { x = 30, y = 10 })
+        assert.are.same(1, #scheduled)
+        assert.are.same(2, #canvas.paint_segments)
+        assert.are.same(1, dirty)
+    end)
+
     it("cancels pending live presentation before final quality cleanup", function()
         local scheduled
         local unscheduled
@@ -158,5 +180,16 @@ describe("Paper Pro InkCanvas", function()
         active = true
         canvas:paintTo({}, 0, 0)
         assert.are.same(1, strokes_drawn)
+    end)
+
+    it("excludes the Write Mode toolbar from the drawing surface", function()
+        local toolbar = Geom:new{ x = 0, y = 420, w = 320, h = 60 }
+        local canvas = InkCanvas:new{
+            dimen = Geom:new{ x = 0, y = 0, w = 320, h = 480 },
+            renderer = InkRenderer:new(), excluded_regions = { toolbar },
+            ui_manager = { show = function() end, close = function() end },
+        }
+        assert.is_true(canvas:isPointAllowed{ x = 100, y = 300 })
+        assert.is_false(canvas:isPointAllowed{ x = 100, y = 450 })
     end)
 end)

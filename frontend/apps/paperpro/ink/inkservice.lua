@@ -17,14 +17,55 @@ function InkService:new(options)
     options.ui_manager = options.ui_manager or UIManager
     options.max_history = options.max_history or 50
     options.max_strokes = options.max_strokes or 5000
+    options.persistence_delay = options.persistence_delay or 0.5 -- KOReader's default hold/idle interval.
+    options.eraser_radius = options.eraser_radius or 16
     options.strokes = {}
     options.undo_stack = {}
     options.redo_stack = {}
     options.sequence = 0
     options.purpose = options.purpose or "document_annotation"
     local service = setmetatable(options, self)
+    service._idle_task = function() service:_flushIdle() end
     service.canvas:setService(service)
     return service
+end
+
+function InkService:_metric(name, value, maximum)
+    if self.metric then self.metric(name, value, maximum) end
+end
+
+function InkService:_cancelIdle()
+    if self.idle_scheduled then self.ui_manager:unschedule(self._idle_task) end
+    self.idle_scheduled = false
+end
+
+function InkService:_scheduleIdle()
+    self:_cancelIdle()
+    self.idle_scheduled = true
+    self.ui_manager:scheduleIn(self.persistence_delay, self._idle_task)
+end
+
+function InkService:_markDirty(region)
+    self.store_dirty = true
+    if region then
+        self.writing_region = self.writing_region
+            and self.writing_region:combine(region) or region:copy()
+    end
+    self:_scheduleIdle()
+end
+
+function InkService:_flushIdle()
+    self.idle_scheduled = false
+    if self.active_stroke or self.eraser_contact then
+        self:_scheduleIdle()
+        return false
+    end
+    if self.writing_region then
+        self.canvas:requestQualityCleanup(self.writing_region)
+        self.writing_region = nil
+    end
+    if self.store_dirty then return self:_persist() end
+    return true
 end
 
 local function eventTimestamp(slot)
@@ -65,13 +106,19 @@ function InkService:activate()
     local registered, err = self:_registerCallback()
     if not registered then return false, err end
     self.active = true
+    self.write_enabled = true
     self.canvas:setInkMode(true, self.eraser_mode)
     return true
 end
 
+function InkService:setWriteEnabled(enabled)
+    self.write_enabled = enabled and true or false
+    if not self.write_enabled then self:_finishActive(eventTimestamp{}) end
+end
+
 function InkService:deactivate()
     if not self.active then return true end
-    self:_finishActive(eventTimestamp{})
+    self:flush()
     if self.input.stylus_callback == self._stylus_callback then
         self.input:unregisterStylusCallback()
     end
@@ -108,6 +155,7 @@ function InkService:_point(slot)
 end
 
 function InkService:_beginStroke(slot)
+    self:_cancelIdle()
     local point = self:_point(slot)
     if not self.canvas:isPointAllowed(point) then return false end
     local stroke = InkStroke:new{
@@ -118,6 +166,7 @@ function InkService:_beginStroke(slot)
     }
     local added = stroke:addPoint(point, self.canvas:getDrawingBounds())
     if not added then return false end
+    self:_metric("marker_samples_retained")
     self.active_stroke = stroke
     self.active_contact_id = slot.id
     self.canvas:setActiveStroke(stroke)
@@ -132,6 +181,7 @@ function InkService:_updateStroke(slot)
     local previous = self.active_stroke.points[#self.active_stroke.points]
     local added = self.active_stroke:addPoint(point, self.canvas:getDrawingBounds())
     if added then
+        self:_metric("marker_samples_retained")
         self.canvas:requestActiveSegment(previous, self.active_stroke.points[#self.active_stroke.points])
     end
     return added
@@ -140,6 +190,10 @@ end
 function InkService:_persist()
     local ok, err = self.store:save(self.strokes)
     self.last_persistence_error = ok and nil or err
+    if ok then
+        self.store_dirty = false
+        self:_metric("persistence_saves")
+    end
     if not ok then logger.err("Paper Pro ink persistence failed:", err) end
     return ok, err
 end
@@ -169,27 +223,33 @@ function InkService:_finishActive(timestamp)
         return false, "stroke_limit"
     end
     table.insert(self.strokes, stored)
-    self:_rebuildIndex()
+    self:_indexStroke(stored)
     self:_pushOperation({ kind = "add", records = {{ stroke = stored, index = #self.strokes }} })
-    self:_persist()
-    self.canvas:requestFinalStroke(self.anchor:projectStroke(stored) or active)
+    local projected = self.anchor:projectStroke(stored) or active
+    local region = self.canvas:finishActiveStroke(projected)
+    self:_markDirty(region)
     return true, stored
 end
 
 function InkService:onStylusEvent(_, slot)
     if not self.active then return false end
     if type(slot) ~= "table" then return true end
+    self:_metric("marker_samples_received")
+    if self.stylus_control_handler and self.stylus_control_handler(slot) then return true end
     local is_down = type(slot.id) == "number" and slot.id >= 0
+    if self.on_pen_contact then self.on_pen_contact(is_down) end
+    if not self.write_enabled then return true end
     local tool = self:_toolName(slot.tool)
 
     if tool == "eraser" then
-        if is_down and not self.eraser_contact and type(slot.x) == "number"
-                and type(slot.y) == "number" then
+        if is_down and not self.eraser_contact then
             self:_finishActive(eventTimestamp(slot))
-            self:eraseAt({ x = slot.x, y = slot.y })
-            self.eraser_contact = true
+            self:_beginEraserGesture()
+        end
+        if is_down and type(slot.x) == "number" and type(slot.y) == "number" then
+            self:_eraseGestureAt({ x = slot.x, y = slot.y })
         elseif not is_down then
-            self.eraser_contact = false
+            self:_finishEraserGesture()
         end
         return true
     end
@@ -211,6 +271,7 @@ function InkService:onStylusEvent(_, slot)
 end
 
 function InkService:getRenderableStrokes()
+    if self.visible_cache then return self.visible_cache end
     local visible = {}
     for _, key in ipairs(self.anchor:visibleKeys()) do
         for _, stroke in ipairs(self.stroke_index[key] or {}) do
@@ -218,7 +279,33 @@ function InkService:getRenderableStrokes()
             if projected then table.insert(visible, projected) end
         end
     end
-    return visible
+    self.visible_cache = visible
+    return self.visible_cache
+end
+
+function InkService:invalidateVisibleCache()
+    self.visible_cache = nil
+end
+
+function InkService:_indexStroke(stroke)
+    local key = self.anchor:key(stroke)
+    if key then
+        self.stroke_index[key] = self.stroke_index[key] or {}
+        table.insert(self.stroke_index[key], stroke)
+    end
+    self:invalidateVisibleCache()
+end
+
+function InkService:_removeIndexedStroke(stroke)
+    local key = self.anchor:key(stroke)
+    local indexed = key and self.stroke_index[key]
+    if indexed then
+        for index = #indexed, 1, -1 do
+            if indexed[index].id == stroke.id then table.remove(indexed, index); break end
+        end
+        if #indexed == 0 then self.stroke_index[key] = nil end
+    end
+    self:invalidateVisibleCache()
 end
 
 function InkService:_rebuildIndex()
@@ -230,6 +317,7 @@ function InkService:_rebuildIndex()
             table.insert(self.stroke_index[key], stroke)
         end
     end
+    self:invalidateVisibleCache()
 end
 
 function InkService:_recordRegion(records)
@@ -247,6 +335,7 @@ function InkService:_removeRecord(record)
         if stroke.id == record.stroke.id then
             record.index = record.index or index
             table.remove(self.strokes, index)
+            self:_removeIndexedStroke(record.stroke)
             return true
         end
     end
@@ -258,18 +347,22 @@ function InkService:_insertRecord(record)
         if stroke.id == record.stroke.id then return false end
     end
     table.insert(self.strokes, math.min(record.index or (#self.strokes + 1), #self.strokes + 1), record.stroke)
+    self:_indexStroke(record.stroke)
     return true
 end
 
 function InkService:_applyOperation(action, undo)
     local region = self:_recordRegion(action.records)
     local insert = action.kind == "delete" and undo or action.kind == "add" and not undo
+    table.sort(action.records, function(left, right)
+        if insert then return (left.index or 1) < (right.index or 1) end
+        return (left.index or 1) > (right.index or 1)
+    end)
     for _, record in ipairs(action.records) do
         if insert then self:_insertRecord(record) else self:_removeRecord(record) end
     end
-    self:_rebuildIndex()
-    self:_persist()
-    self.canvas:restoreRegion(region)
+    self.canvas:requestLiveRestore(region)
+    self:_markDirty(region)
 end
 
 function InkService:canUndo() return #self.undo_stack > 0 end
@@ -277,6 +370,7 @@ function InkService:canRedo() return #self.redo_stack > 0 end
 
 function InkService:undo()
     self:_finishActive(eventTimestamp{})
+    self:_finishEraserGesture()
     local action = table.remove(self.undo_stack)
     if not action then return false end
     self:_applyOperation(action, true)
@@ -285,6 +379,7 @@ function InkService:undo()
 end
 
 function InkService:redo()
+    self:_finishEraserGesture()
     local action = table.remove(self.redo_stack)
     if not action then return false end
     self:_applyOperation(action, false)
@@ -297,21 +392,67 @@ function InkService:_deleteRecords(records)
     local region = self:_recordRegion(records)
     table.sort(records, function(left, right) return left.index > right.index end)
     for _, record in ipairs(records) do self:_removeRecord(record) end
-    self:_rebuildIndex()
     self:_pushOperation({ kind = "delete", records = records })
-    self:_persist()
-    self.canvas:restoreRegion(region)
+    self.canvas:requestLiveRestore(region)
+    self:_markDirty(region)
+    return true
+end
+
+function InkService:_beginEraserGesture()
+    self:_cancelIdle()
+    self.eraser_contact = true
+    self.eraser_records = {}
+    self.eraser_ids = {}
+    self.eraser_original_indices = {}
+    for index, stroke in ipairs(self.strokes) do self.eraser_original_indices[stroke.id] = index end
+    self.eraser_region = nil
+end
+
+function InkService:_eraseGestureAt(point)
+    if not self.eraser_contact then self:_beginEraserGesture() end
+    local removed = false
+    for index = #self.strokes, 1, -1 do
+        local stroke = self.strokes[index]
+        if not self.eraser_ids[stroke.id] then
+            local projected = self.anchor:projectStroke(stroke)
+            if projected and self.renderer:hitTest(projected, point, self.eraser_radius) then
+                local region = self.renderer:boundsForStroke(projected, self.canvas.dimen, 2)
+                local record = { stroke = stroke,
+                    index = self.eraser_original_indices[stroke.id] or index }
+                self.eraser_ids[stroke.id] = true
+                table.insert(self.eraser_records, record)
+                self:_removeRecord(record)
+                if region then
+                    self.eraser_region = self.eraser_region
+                        and self.eraser_region:combine(region) or region:copy()
+                    self.canvas:requestLiveRestore(region)
+                end
+                removed = true
+            end
+        end
+    end
+    return removed
+end
+
+function InkService:_finishEraserGesture()
+    if not self.eraser_contact then return false end
+    self.eraser_contact = false
+    local records = self.eraser_records or {}
+    local region = self.eraser_region
+    self.eraser_records, self.eraser_ids, self.eraser_original_indices, self.eraser_region =
+        nil, nil, nil, nil
+    if #records == 0 then return false end
+    table.sort(records, function(left, right) return left.index < right.index end)
+    self:_pushOperation({ kind = "delete", records = records })
+    self:_markDirty(region)
     return true
 end
 
 function InkService:eraseAt(point)
-    for index = #self.strokes, 1, -1 do
-        local projected = self.anchor:projectStroke(self.strokes[index])
-        if projected and self.renderer:hitTest(projected, point) then
-            return self:_deleteRecords{{ stroke = self.strokes[index], index = index }}
-        end
-    end
-    return false
+    self:_beginEraserGesture()
+    local removed = self:_eraseGestureAt(point)
+    self:_finishEraserGesture()
+    return removed
 end
 
 function InkService:deleteLastVisible()
@@ -349,26 +490,45 @@ function InkService:importScreenStrokes(strokes, conversation_id)
         stored.purpose = "ai_question"
         stored.conversation_id = conversation_id
         table.insert(self.strokes, stored)
+        self:_indexStroke(stored)
         table.insert(records, { stroke = stored, index = #self.strokes })
     end
     if #records == 0 then return false, "empty" end
-    self:_rebuildIndex()
     self:_pushOperation({ kind = "add", records = records })
-    self:_persist()
+    local region
     for _, record in ipairs(records) do
-        self.canvas:requestFinalStroke(self.anchor:projectStroke(record.stroke))
+        local projected = self.anchor:projectStroke(record.stroke)
+        local current = self.canvas:requestFinalStroke(projected)
+        if current then region = region and region:combine(current) or current:copy() end
     end
+    self:_markDirty(region)
     return true, records
 end
 
 function InkService:onLocationChanged()
+    self:flush()
+    self:invalidateVisibleCache()
+end
+
+function InkService:flush()
     self:_finishActive(eventTimestamp{})
+    self:_finishEraserGesture()
+    self:_cancelIdle()
+    if self.writing_region then
+        self.canvas:requestQualityCleanup(self.writing_region)
+        self.writing_region = nil
+    end
+    if self.store_dirty then return self:_persist() end
+    return true
 end
 
 function InkService:close()
-    self:_finishActive(eventTimestamp{})
-    self:deactivate()
-    if self.attached then self:_persist() end
+    self:flush()
+    if self.input.stylus_callback == self._stylus_callback then
+        self.input:unregisterStylusCallback()
+    end
+    self.active = false
+    self.write_enabled = false
     self.canvas:detach()
     self.attached = false
 end

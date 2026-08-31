@@ -107,6 +107,22 @@ mode. Pen lift still performs one bounded `ui` quality cleanup. InkCanvas now
 paints only when ReaderUI plus its conversation marker are the active visible
 surface; menus, dialogs, keyboards, definitions, and AI overlays suppress it.
 
+RC4 physical testing established that waveform changes alone cannot make
+normal ReaderUI interaction safe for handwriting. RC5 separates Read Mode from
+an exclusive page-locked Write Mode. Strict mode blocks every page-area finger
+gesture; Automatic mode blocks during Marker contact plus a configurable
+300/500/900 ms post-pen guard based on existing KOReader gesture intervals.
+The direct toolbar provides Write, Undo, Eraser, Navigate, and Done controls to
+finger or Marker. No hover/proximity claim is made because QTFB exposes only
+press/update/release and separate finger contacts.
+
+Live A2 presentation now allows only one outstanding request and adapts its
+interval to observed UI presentation time. Pen lifts update memory/index only;
+one 500 ms writing-idle task performs the unioned quality cleanup and atomic
+persistence save. Page change, close, exit, suspend, and settings flush force
+the same operation. Continuous eraser movement removes every newly hit stroke,
+coalesces A2 restoration, and creates one Undo record per eraser gesture.
+
 ## Firmware and installation risks
 
 - reMarkable OS updates can change input-node numbering, QTFB compatibility,

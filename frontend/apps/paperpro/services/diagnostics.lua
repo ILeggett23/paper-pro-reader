@@ -15,6 +15,21 @@ local safe_fields = {
     duration_ms = true, bounds = true, mode = true,
 }
 
+local safe_counters = {
+    marker_samples_received = true,
+    marker_samples_retained = true,
+    live_presentations_requested = true,
+    live_presentations_coalesced = true,
+    maximum_pending_region_age_ms = true,
+    quality_cleanups = true,
+    persistence_saves = true,
+    touch_suppressed_strict = true,
+    touch_suppressed_pen_guard = true,
+    selection_attempts_suppressed = true,
+    page_actions_blocked = true,
+    deliberate_navigation_actions = true,
+}
+
 local function firstLine(path, prefix)
     local content = util.readFromFile(path, "rb")
     if not content then return nil end
@@ -27,7 +42,21 @@ function Diagnostics:new(options)
     options = options or {}
     options.settings = options.settings or G_reader_settings
     options.path = options.path or (DataStorage:getSettingsDir() .. "/" .. self.FILENAME)
+    options.counters = options.counters or {}
     return setmetatable(options, self)
+end
+
+function Diagnostics:increment(name, value)
+    if not self:isEnabled() or not safe_counters[name] then return false end
+    value = type(value) == "number" and value or 1
+    self.counters[name] = (self.counters[name] or 0) + value
+    return true
+end
+
+function Diagnostics:observeMaximum(name, value)
+    if not self:isEnabled() or not safe_counters[name] or type(value) ~= "number" then return false end
+    self.counters[name] = math.max(self.counters[name] or 0, value)
+    return true
 end
 
 function Diagnostics:isEnabled()
@@ -76,8 +105,10 @@ function Diagnostics:snapshot()
         ink_mode = self.ink_service and self.ink_service.active or false,
         stylus_callback_registered = Device.input.stylus_callback ~= nil,
         touch_routing = "product-overlay-passthrough-v2",
-        ink_live_refresh = "a2-coalesced-30hz-v4",
-        ink_layer_policy = "reader-surface-only-v4",
+        ink_live_refresh = "adaptive-a2-idle-cleanup-v5",
+        ink_layer_policy = "reader-surface-only-v5",
+        write_mode_policy = "exclusive-write-v5",
+        counters = self.counters,
         queue_states = queue_states,
         diagnostic_log = self.path,
     }

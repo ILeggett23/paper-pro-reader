@@ -50,4 +50,10 @@ QTFB manifests, UIManager, framebuffer code, notes, and AI remain unchanged.
 6. Turn a page with a finger and return.
 7. Exit/relaunch and confirm persistence/deletion state.
 
-RC4 remains **NOT TESTED** until the user returns physical evidence.
+## Physical result
+
+RC4 FAIL. Constant refreshes kept normal writing slow and clunky. Palm/finger
+contacts turned pages and selected text, and selection actions competed with
+Ink Mode. The experience lacked a deliberate page-locked writing state and the
+eraser was not continuous. This evidence rejects simultaneous normal ReaderUI
+interaction plus handwriting and establishes RC5's exclusive Write Mode.

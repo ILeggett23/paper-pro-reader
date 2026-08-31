@@ -1,6 +1,6 @@
 # Phase 6 hardware feedback loop
 
-Phase 6 remains open through RC4 physical qualification. Every returned finding is classified:
+Phase 6 remains open through RC5 physical qualification. Every returned finding is classified:
 
 - `INSTALL`
 - `CRASH`
@@ -24,7 +24,7 @@ For each failure:
    change A-class code without physical evidence of an engine blocker.
 4. Implement the smallest fix and a focused regression test.
 5. Run critical Phase 1–5 regressions and package validation.
-6. Produce a uniquely identified RC2/RC3/RC4 artifact without overwriting prior
+6. Produce a uniquely identified RC2/RC3/RC4/RC5 artifact without overwriting prior
    checksums or evidence.
 7. Give the user only the finding-specific retest plus launch/exit, EPUB/PDF,
    and persistence smoke checks.
@@ -74,4 +74,20 @@ whether the stock UI recovered.
   30 Hz interactive ceiling, use supported A2 while contact is active, retain
   final `ui` cleanup, and suppress canvas painting unless ReaderUI is the active
   surface
-- Status: RC4 PHYSICAL RETEST REQUIRED
+- Status: RC4 PHYSICAL FAIL
+
+## RC4 finding 004
+
+- Classification: `INPUT`, `MARKER`, `REFRESH`, and `PERFORMANCE`
+- Device: reMarkable Paper Pro, OS 3.27.3.0
+- Result: constant refreshes made writing slow/clunky; palm/finger input turned
+  pages and selected text during writing; highlighting competed with Ink Mode;
+  eraser was not continuous
+- Architectural conclusion: handwriting cannot remain in normal ReaderUI
+  interaction mode
+- RC5 action: exclusive strict Write Mode, pen/finger guard policy, direct
+  Marker-friendly toolbar, deliberate Navigate/Done controls, adaptive
+  one-outstanding A2 presentation, idle quality cleanup, debounced atomic
+  persistence, incremental visible cache/index work, and grouped continuous
+  eraser
+- Status: RC5 PHYSICAL RETEST REQUIRED

@@ -7,7 +7,7 @@ device token used to authenticate to this backend.
 
 - Node.js 20 or newer.
 - An OpenAI project API key stored only on the backend computer.
-- A configured model supporting text and image input; RC4 defaults to
+- A configured model supporting text and image input; RC5 defaults to
   `gpt-5.4-mini`.
 - Paper Pro and backend network reachability.
 

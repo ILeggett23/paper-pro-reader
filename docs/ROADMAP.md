@@ -56,8 +56,10 @@ rendered on OS 3.27.3.0 but was blocked by a product-overlay touch-routing
 failure. RC2 physically fixed touch and validated core reading, notes, and ink
 persistence; live ink remained invisible until pen lift. RC3 proved live
 presentation but failed at normal speed and contaminated higher UI layers. RC4
-adds bounded A2 coalescing and reader-surface-only painting and remains pending
-physical retest. Phase 6 stays open until that evidence is reviewed.
+still allowed writing and ReaderUI gestures to compete. RC5 adds exclusive
+Write/Read interaction modes, palm suppression, idle cleanup/persistence, and
+continuous erasing and remains pending physical retest. Phase 6 stays open
+until that evidence is reviewed.
 
 The next phase should focus only on physical Paper Pro qualification and
 product polish: real Marker/refresh/latency evidence, shared backend

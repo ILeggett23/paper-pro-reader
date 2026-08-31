@@ -20,6 +20,7 @@ local InkCanvas = require("apps/paperpro/ink/inkcanvas")
 local InkRenderer = require("apps/paperpro/ink/inkrenderer")
 local InkService = require("apps/paperpro/ink/inkservice")
 local InkStore = require("apps/paperpro/ink/inkstore")
+local WriteToolbar = require("apps/paperpro/ink/writetoolbar")
 local InkQuestionSession = require("apps/paperpro/ink/inkquestionsession")
 local NoteOverlay = require("apps/paperpro/overlays/noteoverlay")
 local NotesHub = require("apps/paperpro/hubs/noteshub")
@@ -51,6 +52,8 @@ function PaperProReader:_isReaderSurfaceActive()
             -- reader surface.
         elseif widget == self.conversation_marker then
             -- The small marker is part of the reader surface.
+        elseif widget == self.write_toolbar then
+            -- The Write Mode toolbar is an intentional reader-layer control.
         elseif widget == self.ui then
             return true
         else
@@ -132,6 +135,7 @@ function PaperProReader:init()
             dimen = bounds,
             renderer = self.ink_renderer,
             reader_ui = self.ui,
+            toast = false,
             is_reader_surface_active = function() return self:_isReaderSurfaceActive() end,
         }
         self.ink_anchor = InkAnchor:new{ ui = self.ui, bounds = bounds }
@@ -150,6 +154,31 @@ function PaperProReader:init()
             rasterizer = self.ink_rasterizer,
         }
     end
+    if not self.write_toolbar then
+        local policy = G_reader_settings:readSetting("paperpro_palm_rejection_policy")
+            or (Device.model == "reMarkable Ferrari" and "strict" or "automatic")
+        local guard_ms = G_reader_settings:readSetting("paperpro_post_pen_guard_ms") or 500
+        self.write_toolbar = WriteToolbar:new{
+            dimen = (self.ui.dimen or Screen:getSize()):copy(),
+            policy = policy, guard_ms = guard_ms,
+            route_gesture = function(gesture) return self.conversation_marker:onGesture(gesture) end,
+            on_write = function() self:_setWriteInteractionMode("write") end,
+            on_undo = function() self.ink_service:undo() end,
+            on_eraser = function()
+                self.ink_service:setEraserMode(not self.ink_service.eraser_mode)
+                self.write_toolbar:setEraserMode(self.ink_service.eraser_mode)
+            end,
+            on_navigate = function() self:_setWriteInteractionMode("navigate") end,
+            on_done = function() self:exitWriteMode() end,
+        }
+        self.ink_canvas.excluded_regions = { self.write_toolbar.bounds }
+        self.ink_service.stylus_control_handler = function(slot)
+            return self.write_toolbar:onStylusEvent(slot)
+        end
+        self.ink_service.on_pen_contact = function(active)
+            self.write_toolbar:onPenContact(active)
+        end
+    end
     self.diagnostics = self.diagnostics or Diagnostics:new{
         ai_settings = self.ai_settings, queue = self.offline_queue,
         ink_service = self.ink_service,
@@ -157,6 +186,13 @@ function PaperProReader:init()
     self.conversation_marker.on_touch_route = function(state, mode)
         self.diagnostics:record("touch_route", { state = state, mode = mode })
     end
+    local metric = function(name, value, maximum)
+        if maximum then self.diagnostics:observeMaximum(name, value)
+        else self.diagnostics:increment(name, value) end
+    end
+    self.ink_canvas.metric = metric
+    self.ink_service.metric = metric
+    self.write_toolbar.metric = metric
     self.overlay = self.overlay or ReaderOverlay:new{
         on_dismiss = function()
             self:_onOverlayDismissed()
@@ -623,7 +659,11 @@ function PaperProReader:_openExistingNote(item)
 end
 
 function PaperProReader:onShowSelectionActions(selection, is_word_selection)
-    if self.ink_service.active then self.ink_service:deactivate() end
+    if self.ink_service.active and self.write_toolbar.mode == "write" then
+        self.diagnostics:increment("selection_attempts_suppressed")
+        self.ui.highlight:onClose()
+        return true
+    end
     local snapshot = self.selection_service:createSnapshot(self.ui, selection, {
         is_word_selection = is_word_selection,
     })
@@ -633,6 +673,36 @@ function PaperProReader:onShowSelectionActions(selection, is_word_selection)
     self.active_lookup = nil
     self.current_snapshot = snapshot
     return self.overlay:open(self:_actionsFactory(snapshot), snapshot.screen_boxes, snapshot)
+end
+
+function PaperProReader:_setWriteInteractionMode(mode)
+    if not self.ink_service.active then return false end
+    local write = mode ~= "navigate"
+    self.ink_service:setWriteEnabled(write)
+    self.write_toolbar:setMode(write and "write" or "navigate")
+    self.diagnostics:record("write_mode", { state = write and "write" or "navigate" })
+    return true
+end
+
+function PaperProReader:enterWriteMode()
+    local ok, err = self.ink_service:activate()
+    if not ok then return false, err end
+    self.write_toolbar:setPolicy(
+        G_reader_settings:readSetting("paperpro_palm_rejection_policy")
+            or (Device.model == "reMarkable Ferrari" and "strict" or "automatic"),
+        G_reader_settings:readSetting("paperpro_post_pen_guard_ms") or 500)
+    self.write_toolbar:setEraserMode(self.ink_service.eraser_mode)
+    self.write_toolbar:attach()
+    self:_setWriteInteractionMode("write")
+    self.ink_canvas:refreshStatus()
+    return true
+end
+
+function PaperProReader:exitWriteMode()
+    self.ink_service:deactivate()
+    self.write_toolbar:detach()
+    self.diagnostics:record("write_mode", { state = "done" })
+    return true
 end
 
 function PaperProReader:_showDefinition(model)
@@ -720,10 +790,21 @@ function PaperProReader:onPosUpdate()
     self.conversation_marker:refresh()
 end
 
+function PaperProReader:onSuspend()
+    self.ink_service:flush()
+end
+
+function PaperProReader:onFlushSettings()
+    self.ink_service:flush()
+end
+
 function PaperProReader:onSetDimensions(dimen)
     self.ink_service:onLocationChanged()
     self.ink_canvas:setDimensions(dimen)
+    self.write_toolbar:setDimensions(dimen)
+    self.ink_canvas.excluded_regions = { self.write_toolbar.bounds }
     self.ink_anchor.bounds = self.ink_canvas.dimen
+    self.ink_service:invalidateVisibleCache()
     self.conversation_marker:setDimensions(dimen)
 end
 
@@ -743,12 +824,12 @@ function PaperProReader:onReaderReady()
 end
 
 function PaperProReader:onShow()
-    self.conversation_marker:attach()
     self.ink_service:attach()
+    self.conversation_marker:attach()
 end
 
 function PaperProReader:openNotesHub()
-    self.ink_service:deactivate()
+    if self.ink_service.active then self:exitWriteMode() end
     self.overlay:dismiss(true)
     self.current_snapshot, self.current_note = nil, nil
     self.ui.highlight:onClose()
@@ -756,7 +837,7 @@ function PaperProReader:openNotesHub()
 end
 
 function PaperProReader:openVocabularyHub()
-    self.ink_service:deactivate()
+    if self.ink_service.active then self:exitWriteMode() end
     self.overlay:dismiss(true)
     self.current_snapshot, self.current_note = nil, nil
     self.ui.highlight:onClose()
@@ -764,7 +845,7 @@ function PaperProReader:openVocabularyHub()
 end
 
 function PaperProReader:openAIHistory()
-    self.ink_service:deactivate()
+    if self.ink_service.active then self:exitWriteMode() end
     self.overlay:dismiss(true)
     self.current_snapshot, self.current_note = nil, nil
     self.ui.highlight:onClose()
@@ -934,17 +1015,65 @@ function PaperProReader:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text = _("Ink Mode"),
+                text = _("Write Mode"),
                 checked_func = function() return self.ink_service.active end,
                 check_callback_closes_menu = true,
                 callback = function(touchmenu_instance)
-                    local ok, err = self.ink_service:toggle()
-                    if not ok then UIManager:show(InfoMessage:new{ text = err or _("Ink Mode unavailable") }) end
+                    local ok, err
+                    if self.ink_service.active then ok = self:exitWriteMode()
+                    else ok, err = self:enterWriteMode() end
+                    if not ok then UIManager:show(InfoMessage:new{ text = err or _("Write Mode unavailable") }) end
                     if touchmenu_instance then touchmenu_instance:closeMenu() end
-                    if ok and self.ink_service.active then
-                        UIManager:nextTick(function() self.ink_canvas:refreshStatus() end)
-                    end
                 end,
+            },
+            {
+                text = _("Palm rejection"),
+                sub_item_table = {
+                    {
+                        text = _("Strict"),
+                        checked_func = function()
+                            return (G_reader_settings:readSetting("paperpro_palm_rejection_policy")
+                                or (Device.model == "reMarkable Ferrari" and "strict" or "automatic")) == "strict"
+                        end,
+                        callback = function()
+                            G_reader_settings:saveSetting("paperpro_palm_rejection_policy", "strict")
+                            self.write_toolbar:setPolicy("strict")
+                        end,
+                    },
+                    {
+                        text = _("Automatic"),
+                        checked_func = function()
+                            return G_reader_settings:readSetting("paperpro_palm_rejection_policy") == "automatic"
+                        end,
+                        callback = function()
+                            G_reader_settings:saveSetting("paperpro_palm_rejection_policy", "automatic")
+                            self.write_toolbar:setPolicy("automatic")
+                        end,
+                    },
+                    {
+                        text = _("Post-pen guard"),
+                        sub_item_table = {
+                            { text = _("300 ms"), checked_func = function()
+                                return G_reader_settings:readSetting("paperpro_post_pen_guard_ms") == 300 end,
+                                callback = function()
+                                    G_reader_settings:saveSetting("paperpro_post_pen_guard_ms", 300)
+                                    self.write_toolbar:setPolicy(self.write_toolbar.policy, 300)
+                                end },
+                            { text = _("500 ms"), checked_func = function()
+                                return (G_reader_settings:readSetting("paperpro_post_pen_guard_ms") or 500) == 500 end,
+                                callback = function()
+                                    G_reader_settings:saveSetting("paperpro_post_pen_guard_ms", 500)
+                                    self.write_toolbar:setPolicy(self.write_toolbar.policy, 500)
+                                end },
+                            { text = _("900 ms"), checked_func = function()
+                                return G_reader_settings:readSetting("paperpro_post_pen_guard_ms") == 900 end,
+                                callback = function()
+                                    G_reader_settings:saveSetting("paperpro_post_pen_guard_ms", 900)
+                                    self.write_toolbar:setPolicy(self.write_toolbar.policy, 900)
+                                end },
+                        },
+                    },
+                },
             },
             {
                 text = _("Ink eraser"),
@@ -952,6 +1081,7 @@ function PaperProReader:addToMainMenu(menu_items)
                 checked_func = function() return self.ink_service.eraser_mode end,
                 callback = function()
                     self.ink_service:setEraserMode(not self.ink_service.eraser_mode)
+                    self.write_toolbar:setEraserMode(self.ink_service.eraser_mode)
                 end,
             },
             {
@@ -1021,6 +1151,7 @@ function PaperProReader:onCloseDocument()
         self.offline_queue:removeListener(self._ai_queue_listener)
         self._ai_queue_listener = nil
     end
+    self.write_toolbar:detach()
     self.ink_service:close()
     self.notes_hub:close()
     self.vocabulary_hub:close()
