@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: phase-6n1b-${{ github.ref }}
   cancel-in-progress: true
@@ -77,7 +81,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: phase6n1b-source-qualification-${{ github.sha }}
-          archive: false
           path: phase6n1b-source-output
 
   appload-target:
@@ -284,7 +287,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: phase6n1b-appload-target-${{ github.sha }}
-          archive: false
           path: phase6n1b-appload-output
 
   koreader-target:
@@ -477,7 +479,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: phase6n1b-koreader-target-${{ github.sha }}
-          archive: false
           path: |
             phase6n1b-koreader-output
             phase6n1b-koreader-logs
