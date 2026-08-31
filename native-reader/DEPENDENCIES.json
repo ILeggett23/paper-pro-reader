@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "project_license": "AGPL-3.0-only",
+  "dependencies": [
+    {
+      "name": "Quill",
+      "version": "v0.1.0",
+      "commit": "39262ee0bef69915e3ead3ac218d5973916f422a",
+      "license": "MIT",
+      "source": "https://github.com/MaximeRivest/quill",
+      "redistributed": "ABI header and license only",
+      "runtime": "user-built device-local libquill.so"
+    },
+    {
+      "name": "rm-appload",
+      "version": "v0.5.3",
+      "commit": "5bb34a362f09f753f18bd6261558f8e2737aacdb",
+      "license": "GPL-3.0-only",
+      "source": "https://github.com/asivery/rm-appload",
+      "redistributed": "no",
+      "runtime": "external QTFB fallback prerequisite"
+    },
+    {
+      "name": "Xovi",
+      "version": "v0.3.3",
+      "commit": "0c8d5269b55c851901d4e4a754dc2d7deab40b17",
+      "license": "LGPL-3.0-only",
+      "source": "https://github.com/asivery/rm-xovi",
+      "redistributed": "no",
+      "runtime": "external launcher prerequisite"
+    },
+    {
+      "name": "Ferrari public SDK",
+      "version": "remarkable-production-image-5.7.119-ferrari-public (3.27.0.97)",
+      "sha256": "324d77d84dda5ba8fac484107b3c9981daaa28fe5ebed6589172f0cb1bcdd020",
+      "license": "reMarkable SDK terms",
+      "source": "https://developer.remarkable.com/links",
+      "redistributed": "no",
+      "runtime": "build-only"
+    },
+    {
+      "name": "libqsgepaper.so",
+      "version": "device firmware supplied",
+      "license": "proprietary reMarkable software",
+      "redistributed": "never",
+      "runtime": "loaded only through the operator-built Quill adapter"
+    }
+  ]
+}
