@@ -1,10 +1,13 @@
 local Blitbuffer = require("ffi/blitbuffer")
+local Device = require("device")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
+
+local Screen = Device.screen
 
 local InkCanvas = WidgetContainer:extend{
     -- Ink is a paint-only surface. UIManager's toast contract keeps it in the
@@ -17,7 +20,15 @@ local InkCanvas = WidgetContainer:extend{
 function InkCanvas:init()
     self.ui_manager = self.ui_manager or UIManager
     self.dimen = self.dimen or Geom:new{ x = 0, y = 0, w = 600, h = 800 }
+    -- Match KOReader's existing interactive pan ceiling: 30 Hz normally, or
+    -- 2 Hz only on devices already classified as low-pan-rate.
+    self.active_refresh_interval = self.active_refresh_interval
+        or 1 / (Screen.low_pan_rate and 2 or 30)
     self.paint_segments = {}
+    self.pending_region = nil
+    self.active_refresh_scheduled = false
+    self.active_refresh_requested = false
+    self._active_refresh_task = function() self:_flushActiveRefresh() end
     self.status_bounds = Geom:new{
         x = self.dimen.x + self.dimen.w - math.min(96, math.floor(self.dimen.w * 0.2)),
         y = self.dimen.y,
@@ -25,6 +36,32 @@ function InkCanvas:init()
         h = math.min(42, math.floor(self.dimen.h * 0.07)),
     }
     self.show_status = self.show_status ~= false
+end
+
+function InkCanvas:_readerSurfaceIsActive()
+    return not self.is_reader_surface_active or self.is_reader_surface_active()
+end
+
+function InkCanvas:_cancelActiveRefresh()
+    if self.active_refresh_scheduled and self.ui_manager.unschedule then
+        self.ui_manager:unschedule(self._active_refresh_task)
+    end
+    self.active_refresh_scheduled = false
+    self.active_refresh_requested = false
+end
+
+function InkCanvas:_clearPendingSegments()
+    self:_cancelActiveRefresh()
+    self.paint_segments = {}
+    self.pending_region = nil
+end
+
+function InkCanvas:_flushActiveRefresh()
+    self.active_refresh_scheduled = false
+    if not self.pending_region or not self:_readerSurfaceIsActive() then return false end
+    self.active_refresh_requested = true
+    self.ui_manager:setDirty(self, "a2", self.pending_region)
+    return true
 end
 
 function InkCanvas:setService(service)
@@ -53,7 +90,7 @@ function InkCanvas:detach()
     self.attached = false
     self.ui_manager:close(self)
     self.active_stroke = nil
-    self.paint_segments = {}
+    self:_clearPendingSegments()
     return true
 end
 
@@ -97,11 +134,22 @@ function InkCanvas:_paintStatus(bb, x, y)
 end
 
 function InkCanvas:paintTo(bb, x, y)
+    if not self:_readerSurfaceIsActive() then return end
     if self.paint_segments[1] then
+        local region = self.pending_region
+        local refresh_requested = self.active_refresh_requested
+        self:_cancelActiveRefresh()
         for _, segment in ipairs(self.paint_segments) do
             self.renderer:drawSegment(bb, segment[1], segment[2], x, y)
         end
         self.paint_segments = {}
+        self.pending_region = nil
+        -- A menu/modal may have deferred the scheduled paint. When it closes,
+        -- UIManager repaints the uncovered stack; request the accumulated A2
+        -- region here so those deferred samples become visible exactly once.
+        if region and not refresh_requested then
+            self.ui_manager:setDirty(nil, "a2", region)
+        end
         return
     end
     if self.service then
@@ -117,7 +165,7 @@ function InkCanvas:setInkMode(enabled, eraser_mode)
     local previous_bounds = self.status_bounds:copy()
     self.ink_mode = enabled and true or false
     self.eraser_mode = eraser_mode and true or false
-    self.paint_segments = {}
+    self:_clearPendingSegments()
     if self.ink_mode and self.show_status then
         self.ui_manager:setDirty(self, "ui", previous_bounds)
     elseif self.show_status and self.reader_ui then
@@ -138,17 +186,20 @@ function InkCanvas:requestActiveSegment(previous_point, point)
     table.insert(self.paint_segments, segment)
     local region = self.renderer:boundsForPoints(
         segment, self.dimen, 1)
-    -- The Paper Pro QTFB shim did not visibly present the DU/fast path during
-    -- physical RC2 testing. Use the same bounded UI refresh that already
-    -- presents completed strokes, while retaining every segment received in a
-    -- single input batch until paintTo drains it.
-    if region then self.ui_manager:setDirty(self, "ui", region) end
+    if region then
+        self.pending_region = self.pending_region
+            and self.pending_region:combine(region) or region:copy()
+        if self:_readerSurfaceIsActive() and not self.active_refresh_scheduled then
+            self.active_refresh_scheduled = true
+            self.ui_manager:scheduleIn(self.active_refresh_interval, self._active_refresh_task)
+        end
+    end
     return region
 end
 
 function InkCanvas:requestFinalStroke(stroke)
     self.active_stroke = nil
-    self.paint_segments = {}
+    self:_clearPendingSegments()
     local region = self.renderer:boundsForStroke(stroke, self.dimen, 2)
     if region then self.ui_manager:setDirty(self, "ui", region) end
     return region
@@ -156,7 +207,7 @@ end
 
 function InkCanvas:restoreRegion(region)
     self.active_stroke = nil
-    self.paint_segments = {}
+    self:_clearPendingSegments()
     if region and self.reader_ui then
         self.ui_manager:setDirty(self.reader_ui.dialog, "partial", region)
     end

@@ -59,6 +59,7 @@ function ConversationMarker:onTapConversation()
 end
 
 function ConversationMarker:onGesture(gesture)
+    if self.on_touch_route then self.on_touch_route("touch_detected", gesture.ges) end
     if InputContainer.onGesture(self, gesture) then
         if self.on_touch_route then self.on_touch_route("conversation_marker", gesture.ges) end
         return true
@@ -68,7 +69,11 @@ function ConversationMarker:onGesture(gesture)
     -- gesture must be explicitly returned to the reader because UIManager only
     -- dispatches normal input to the topmost non-toast window.
     if self.on_touch_route then self.on_touch_route("reader_forwarded", gesture.ges) end
-    return self.ui:handleEvent(Event:new("Gesture", gesture))
+    local handled = self.ui:handleEvent(Event:new("Gesture", gesture))
+    if self.on_touch_route then
+        self.on_touch_route(handled and "reader_handled" or "reader_unhandled", gesture.ges)
+    end
+    return handled
 end
 
 function ConversationMarker:attach()

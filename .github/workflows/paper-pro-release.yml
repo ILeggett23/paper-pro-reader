@@ -25,7 +25,7 @@ jobs:
     env:
       BASH_ENV: /home/ko/.bashrc
       MAKEFLAGS: OUTPUT_DIR=build-remarkable INSTALL_DIR=install-remarkable TARGET=remarkable-aarch64 PARALLEL_JOBS=4
-      RC_VERSION: 0.6.0-rc3
+      RC_VERSION: 0.6.0-rc4
     steps:
       - name: Checkout
         uses: actions/checkout@v6

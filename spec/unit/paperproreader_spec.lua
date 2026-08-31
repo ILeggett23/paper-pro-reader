@@ -1,5 +1,5 @@
 describe("Paper Pro Reader composition", function()
-    local DocumentRegistry, Event, Geom, ReaderUI, Screen, Time, UIManager
+    local DocumentRegistry, Event, Geom, ReaderUI, Screen, Time, UIManager, WidgetContainer
     local readerui
 
     setup(function()
@@ -12,6 +12,7 @@ describe("Paper Pro Reader composition", function()
         Screen = require("device").screen
         Time = require("ui/time")
         UIManager = require("ui/uimanager")
+        WidgetContainer = require("ui/widget/container/widgetcontainer")
         readerui = ReaderUI:new{
             dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument("spec/front/unit/data/juliet.epub"),
@@ -111,6 +112,31 @@ describe("Paper Pro Reader composition", function()
         assert.is_truthy(forwarded)
         assert.are.same("onGesture", forwarded.handler)
         assert.are.same("tap", forwarded.args[1].ges)
+    end)
+
+    it("keeps finger routing active while Ink Mode is enabled", function()
+        local forwarded
+        local original_handle = readerui.handleEvent
+        readerui.handleEvent = function(_, event)
+            forwarded = event
+            return true
+        end
+        assert.is_true(readerui.paperpro.ink_service:activate())
+        UIManager:sendEvent(Event:new("Gesture", {
+            ges = "swipe", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        }))
+        readerui.handleEvent = original_handle
+        assert.is_truthy(forwarded)
+        assert.are.same("swipe", forwarded.args[1].ges)
+    end)
+
+    it("suppresses InkCanvas painting while another UI window covers the reader", function()
+        assert.is_true(readerui.paperpro:_isReaderSurfaceActive())
+        local modal = WidgetContainer:new{ modal = true }
+        UIManager:show(modal)
+        assert.is_false(readerui.paperpro:_isReaderSurfaceActive())
+        UIManager:close(modal)
+        assert.is_true(readerui.paperpro:_isReaderSurfaceActive())
     end)
 
     it("uses the existing highlight annotation authority", function()

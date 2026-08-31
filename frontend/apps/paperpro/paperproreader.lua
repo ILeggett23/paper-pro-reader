@@ -44,6 +44,24 @@ local PaperProReader = WidgetContainer:extend{
     name = "PaperProReader",
 }
 
+function PaperProReader:_isReaderSurfaceActive()
+    for widget in UIManager:topdown_widgets_iter() do
+        if widget == self.ink_canvas or widget.toast then
+            -- Paint-only canvas and transient notifications do not replace the
+            -- reader surface.
+        elseif widget == self.conversation_marker then
+            -- The small marker is part of the reader surface.
+        elseif widget == self.ui then
+            return true
+        else
+            -- A menu, dialog, keyboard, definition, or AI overlay is above the
+            -- reader. InkCanvas must not paint over it.
+            return false
+        end
+    end
+    return false
+end
+
 function PaperProReader:init()
     self.selection_service = self.selection_service or SelectionService:new()
     self.definition_service = self.definition_service or DefinitionService:new{
@@ -114,6 +132,7 @@ function PaperProReader:init()
             dimen = bounds,
             renderer = self.ink_renderer,
             reader_ui = self.ui,
+            is_reader_surface_active = function() return self:_isReaderSurfaceActive() end,
         }
         self.ink_anchor = InkAnchor:new{ ui = self.ui, bounds = bounds }
         self.ink_store = InkStore:new{
@@ -690,11 +709,13 @@ function PaperProReader:onNetworkConnected()
 end
 
 function PaperProReader:onPageUpdate()
+    if self.diagnostics then self.diagnostics:record("page_action", { state = "page_update" }) end
     self.ink_service:onLocationChanged()
     self.conversation_marker:refresh()
 end
 
 function PaperProReader:onPosUpdate()
+    if self.diagnostics then self.diagnostics:record("page_action", { state = "position_update" }) end
     self.ink_service:onLocationChanged()
     self.conversation_marker:refresh()
 end

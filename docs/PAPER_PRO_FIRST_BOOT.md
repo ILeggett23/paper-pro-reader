@@ -1,17 +1,18 @@
-# Paper Pro RC3 live-ink retest
+# Paper Pro RC4 live-ink and layer-isolation retest
 
 Run this focused test before resuming the longer qualification. Do not mark
 live ink PASS unless it is visible before pen lift on the physical panel.
 
 | Step | Action | PASS | Record on FAIL |
 | --- | --- | --- | --- |
-| 1 | Enable Ink Mode | `INK` status appears | Missing status or touch regression |
-| 2 | Draw one slow horizontal line | Ink visibly follows while the tip remains down | Video; whether all ink waited for lift |
-| 3 | Draw several letters at normal speed | Continuous visible writing; no missing live segments | Video, gaps, latency, ghosting |
-| 4 | Undo once | Last stroke disappears immediately | Delay or stale pixels |
-| 5 | Draw again and use eraser once | Eraser removes the intended stroke | Wrong stroke, delayed refresh |
-| 6 | Exit and relaunch | Remaining ink persists and undone/erased ink stays absent | Any restored deleted stroke |
-| 7 | Turn one EPUB page and return | Finger touch and reading position still work | Touch or navigation regression |
+| 1 | Enable Ink Mode and draw one slow line | Ink follows the tip before lift | Video; latency and missing segments |
+| 2 | Write `testing ink` at normal speed | Continuous live ink with low latency | Video, gaps, ghosting |
+| 3 | Open Tools while ink exists | No ink is painted over the menu | Photo of menu |
+| 4 | Open and close another modal | No ink is painted over the modal | Photo before/after close |
+| 5 | Undo one stroke | Stroke disappears immediately | Delayed or residual stroke |
+| 6 | Erase one stroke | Stroke disappears immediately | Persisted vs visible discrepancy |
+| 7 | Turn a page with a finger and return | No finger/page-turn regression | Missed/delayed gesture |
+| 8 | Exit and relaunch | Persistence and deletion state are correct | Any restored deleted stroke |
 
-If live ink passes, continue with `PAPER_PRO_AB_TESTS.md`. Dictionary remains
+If RC4 passes, continue with `PAPER_PRO_AB_TESTS.md`. Dictionary remains
 inconclusive until an English StarDict dictionary is installed and verified.

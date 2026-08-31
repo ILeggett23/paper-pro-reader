@@ -76,7 +76,8 @@ function Diagnostics:snapshot()
         ink_mode = self.ink_service and self.ink_service.active or false,
         stylus_callback_registered = Device.input.stylus_callback ~= nil,
         touch_routing = "product-overlay-passthrough-v2",
-        ink_live_refresh = "ui-batched-segments-v3",
+        ink_live_refresh = "a2-coalesced-30hz-v4",
+        ink_layer_policy = "reader-surface-only-v4",
         queue_states = queue_states,
         diagnostic_log = self.path,
     }

@@ -2,7 +2,7 @@
 
 ## Stage A
 
-Current RC identity: `0.6.0-rc3` / Phase 6 RC3.
+Current RC identity: `0.6.0-rc4` / Phase 6 RC4.
 
 Stage A provides:
 
@@ -29,6 +29,14 @@ after pen lift. RC3 keeps RC2 behavior and changes only active-segment painting
 to the already-proven bounded `ui` refresh while batching every segment received
 before the next paint.
 
+RC3 made slow ink visible but failed at normal writing speed with HIGH latency,
+SEVERE ghosting, menu/modal contamination, eraser presentation failure, and
+finger page-turn regression. RC4 rejects per-segment GL16. It continuously
+captures samples, coalesces presentation at KOReader's established 30 Hz
+interactive ceiling, uses QTFB-supported A2 while contact is active, retains
+one final `ui` cleanup, and suppresses InkCanvas painting whenever a non-reader
+window is above ReaderUI.
+
 The package contains the native KOReader aarch64 launcher, resources, pinned
 libraries, Paper Pro product modules, `koreader.sh`, QTFB/AppLoad manifests,
 keep-alive helper, and aarch64 README. Xovi, qt-resource-rebuilder, rm-appload,
@@ -47,6 +55,7 @@ Study > Diagnostics can enable a bounded JSON-lines log and view a report with:
 - Ink Mode and stylus-callback state.
 - RC2 product-overlay touch-routing identity.
 - RC3 live-ink refresh strategy identity.
+- RC4 A2 cadence and reader-surface layer policy.
 
 Logged lifecycle fields are restricted to event, request ID, state, error
 category, points, bounds, mode, and duration. Keys, tokens, URLs, book text,
@@ -64,10 +73,10 @@ scp root@<PAPER_PRO_IP>:/home/root/xovi/exthome/appload/koreader/settings/paperp
 
 ## Stage B
 
-Stage B continues when the user upgrades to RC3 and returns
+Stage B continues when the user upgrades to RC4 and returns
 `PAPER_PRO_TEST_REPORT_TEMPLATE.md`. No physical qualification row becomes
 PASS before that explicit evidence. Failures enter the controlled process in
-`PHASE6_FEEDBACK_LOOP.md`, produce an identified RC2/RC3, and retain previous
+`PHASE6_FEEDBACK_LOOP.md`, produce an identified RC2/RC3/RC4, and retain previous
 artifacts and checksums.
 
-Current state: **BLOCKED — RC2 LIVE ACTIVE-STROKE RENDERING FAILURE; RC3 PHYSICAL RETEST REQUIRED**.
+Current state: **BLOCKED — RC3 LIVE REFRESH, LAYER CONTAMINATION, AND RESPONSIVENESS FAILURES; RC4 PHYSICAL RETEST REQUIRED**.

@@ -52,6 +52,7 @@ describe("Paper Pro conversation surfaces", function()
     it("consumes its marker tap and forwards unmatched reader gestures", function()
         local forwarded
         local opened
+        local routes = {}
         local marker = ConversationMarker:new{
             dimen = Geom:new{ x = 0, y = 0, w = 600, h = 800 },
             responses = { listConversationsForDocument = function() return {} end },
@@ -60,6 +61,7 @@ describe("Paper Pro conversation surfaces", function()
                 document = { file = "book.pdf" }, view = {},
             },
             on_open = function(id) opened = id end,
+            on_touch_route = function(state) table.insert(routes, state) end,
         }
         marker.currentConversation = function() return { conversation_id = "c1" } end
 
@@ -68,12 +70,15 @@ describe("Paper Pro conversation surfaces", function()
         })
         assert.are.same("onGesture", forwarded.handler)
         assert.are.same("tap", forwarded.args[1].ges)
+        assert.are.same({ "touch_detected", "reader_forwarded", "reader_handled" }, routes)
 
         forwarded = nil
+        routes = {}
         assert.is_true(marker:onGesture{
             ges = "tap", pos = Geom:new{ x = 550, y = 70, w = 0, h = 0 },
         })
         assert.are.same("c1", opened)
         assert.is_nil(forwarded)
+        assert.are.same({ "touch_detected", "conversation_marker" }, routes)
     end)
 end)

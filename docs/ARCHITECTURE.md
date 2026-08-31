@@ -321,3 +321,12 @@ policy. Active Marker segments are accumulated until `InkCanvas:paintTo()` and
 refreshed with bounded `ui` regions, matching the physically working pen-lift
 path. Finalization, anchors, storage, undo/redo, eraser, ReaderUI, UIManager,
 and framebuffer implementations are unchanged.
+
+RC4 replaces RC3's per-sample GL16 requests with a product-owned presentation
+scheduler. Stylus samples continue entering InkStroke immediately; InkCanvas
+unions their regions and schedules one A2 paint at the existing 30 Hz
+interactive ceiling. Pen lift cancels pending live work and uses the unchanged
+final `ui` cleanup. A window-stack predicate skips all canvas painting while a
+menu, dialog, keyboard, definition, or AI overlay covers ReaderUI. Touch routing
+diagnostics distinguish detection, forwarding, ReaderUI handling, and later
+page/position events without recording coordinates or content.

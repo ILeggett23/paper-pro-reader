@@ -1,6 +1,6 @@
 # Phase 6 hardware feedback loop
 
-Phase 6 remains open through RC3 physical qualification. Every returned finding is classified:
+Phase 6 remains open through RC4 physical qualification. Every returned finding is classified:
 
 - `INSTALL`
 - `CRASH`
@@ -24,7 +24,7 @@ For each failure:
    change A-class code without physical evidence of an engine blocker.
 4. Implement the smallest fix and a focused regression test.
 5. Run critical Phase 1–5 regressions and package validation.
-6. Produce a uniquely identified RC2/RC3 artifact without overwriting prior
+6. Produce a uniquely identified RC2/RC3/RC4 artifact without overwriting prior
    checksums or evidence.
 7. Give the user only the finding-specific retest plus launch/exit, EPUB/PDF,
    and persistence smoke checks.
@@ -59,4 +59,19 @@ whether the stock UI recovered.
   segments when multiple Marker frames arrived in one input batch
 - RC3 action: use bounded `ui` refresh for live segments and retain all pending
   segments until the next canvas paint
-- Status: RC3 PHYSICAL RETEST REQUIRED
+- Status: RC3 PHYSICAL FAIL
+
+## RC3 finding 003
+
+- Classification: `REFRESH`, `LAYOUT`, and `PERFORMANCE`
+- Device: reMarkable Paper Pro, OS 3.27.3.0
+- Result: slow live line PASS; normal-speed writing FAIL with HIGH latency and
+  SEVERE ghosting; ink/residual strokes over menus/modals; eraser and finger
+  page-turn presentation regressed; persistence and Undo remained correct
+- Narrowest layer: per-segment GL16 `ui` updates saturated presentation, while
+  the permanently topmost toast canvas repainted page ink above non-reader UI
+- RC4 action: preserve all samples, coalesce presentation at KOReader's existing
+  30 Hz interactive ceiling, use supported A2 while contact is active, retain
+  final `ui` cleanup, and suppress canvas painting unless ReaderUI is the active
+  surface
+- Status: RC4 PHYSICAL RETEST REQUIRED

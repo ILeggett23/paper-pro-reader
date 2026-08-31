@@ -96,6 +96,16 @@ uses the same bounded `ui` mode for live segment regions and queues every
 segment received before the next paint. It does not request full-screen or
 flashing refreshes and does not change QTFB/framebuffer code.
 
+RC3 physical testing rejected that GL16-per-segment policy: slow ink appeared,
+but normal-speed input caused HIGH latency, SEVERE ghosting, eraser/finger
+presentation regressions, and page ink repainting above menus and dialogs.
+RC4 preserves every sample while scheduling at most one bounded A2 presentation
+per 1/30 second, matching KOReader's existing normal interactive pan ceiling.
+The current AppLoad shim explicitly translates reMarkable A2 to QTFB animate
+mode. Pen lift still performs one bounded `ui` quality cleanup. InkCanvas now
+paints only when ReaderUI plus its conversation marker are the active visible
+surface; menus, dialogs, keyboards, definitions, and AI overlays suppress it.
+
 ## Firmware and installation risks
 
 - reMarkable OS updates can change input-node numbering, QTFB compatibility,

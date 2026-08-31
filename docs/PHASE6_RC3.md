@@ -57,4 +57,11 @@ QTFB manifests, UIManager, and framebuffer implementations are unchanged.
 5. Erase once.
 6. Exit/relaunch and confirm persistence and deletion state.
 
-RC3 live ink remains **NOT TESTED** until the user returns physical evidence.
+## Physical result
+
+RC3 FAIL. A slow line followed the tip, but normal-speed writing had HIGH
+latency and SEVERE ghosting. Finger page turns regressed, eraser presentation
+failed, and ink/residual strokes appeared over the Definition modal and Tools
+menu. Undo and persistence remained correct. This evidence rejects repeated
+GL16 `ui` presentation during contact and establishes the RC4 refresh and
+layer-isolation requirements.
