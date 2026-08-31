@@ -1,0 +1,63 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "host-debug",
+      "displayName": "Host debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/host-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PPR_BUILD_APP": "ON",
+        "PPR_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "host-sanitized",
+      "displayName": "Host ASan + UBSan",
+      "inherits": "host-debug",
+      "binaryDir": "${sourceDir}/build/host-sanitized",
+      "cacheVariables": {
+        "PPR_ENABLE_SANITIZERS": "ON"
+      }
+    },
+    {
+      "name": "ferrari-release",
+      "displayName": "Official Ferrari SDK release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ferrari-release",
+      "toolchainFile": "$env{PPR_FERRARI_CMAKE_TOOLCHAIN_FILE}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PPR_BUILD_APP": "ON",
+        "PPR_BUILD_TESTS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "host-debug", "configurePreset": "host-debug" },
+    { "name": "host-sanitized", "configurePreset": "host-sanitized" },
+    { "name": "ferrari-release", "configurePreset": "ferrari-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "host-debug",
+      "configurePreset": "host-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "host-sanitized",
+      "configurePreset": "host-sanitized",
+      "output": { "outputOnFailure": true },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=0:strict_string_checks=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1:halt_on_error=1"
+      }
+    }
+  ]
+}
