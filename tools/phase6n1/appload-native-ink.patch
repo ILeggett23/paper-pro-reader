@@ -1,0 +1,2457 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ILeggett23 <165199800+ILeggett23@users.noreply.github.com>
+Date: Mon, 31 Aug 2026 14:51:34 -0500
+Subject: [PATCH] spike: add native Paper Pro ink overlay POC
+
+---
+ appload.pro                          |  12 +-
+ docs/PHASE6N1_BUILD.md               |  66 ++++
+ docs/PHASE6N1_NATIVE_INK_PROTOCOL.md | 137 ++++++++
+ resources/qml/appload.qml            |   1 +
+ resources/qml/window.qml             |  17 +
+ src/AppLibrary.h                     |   7 +
+ src/library.h                        |   2 +
+ src/libraryexternals.cpp             |   5 +
+ src/main.cpp                         |   2 +
+ src/nativeink/NativeInkGeometry.h    |  88 +++++
+ src/nativeink/NativeInkInput.cpp     | 254 ++++++++++++++
+ src/nativeink/NativeInkInput.h       | 123 +++++++
+ src/nativeink/NativeInkIpcServer.cpp | 180 ++++++++++
+ src/nativeink/NativeInkIpcServer.h   |  47 +++
+ src/nativeink/NativeInkOverlay.cpp   | 494 +++++++++++++++++++++++++++
+ src/nativeink/NativeInkOverlay.h     | 126 +++++++
+ src/nativeink/NativeInkProtocol.h    | 151 ++++++++
+ src/qtfb/FBController.cpp            |  41 ++-
+ src/qtfb/FBController.h              |   5 +
+ src/qtfb/ScaledRect.h                |  33 ++
+ tests/nativeink_geometry_test.cpp    |  38 +++
+ tests/nativeink_ipc_test.cpp         |  50 +++
+ tests/nativeink_protocol_test.cpp    |  45 +++
+ tests/qtfb_scaled_rect_test.cpp      |  31 ++
+ tests/run-host-tests.sh              |  30 ++
+ tools/build-phase6n1-poc.sh          |  37 ++
+ xovi/template/appload.pro            |  10 +-
+ xovi/template/src/main.cpp           |   2 +
+ 28 files changed, 2020 insertions(+), 14 deletions(-)
+ create mode 100644 docs/PHASE6N1_BUILD.md
+ create mode 100644 docs/PHASE6N1_NATIVE_INK_PROTOCOL.md
+ create mode 100644 src/nativeink/NativeInkGeometry.h
+ create mode 100644 src/nativeink/NativeInkInput.cpp
+ create mode 100644 src/nativeink/NativeInkInput.h
+ create mode 100644 src/nativeink/NativeInkIpcServer.cpp
+ create mode 100644 src/nativeink/NativeInkIpcServer.h
+ create mode 100644 src/nativeink/NativeInkOverlay.cpp
+ create mode 100644 src/nativeink/NativeInkOverlay.h
+ create mode 100644 src/nativeink/NativeInkProtocol.h
+ create mode 100644 src/qtfb/ScaledRect.h
+ create mode 100644 tests/nativeink_geometry_test.cpp
+ create mode 100644 tests/nativeink_ipc_test.cpp
+ create mode 100644 tests/nativeink_protocol_test.cpp
+ create mode 100644 tests/qtfb_scaled_rect_test.cpp
+ create mode 100755 tests/run-host-tests.sh
+ create mode 100755 tools/build-phase6n1-poc.sh
+
+diff --git a/appload.pro b/appload.pro
+index b3308b4..e072c65 100644
+--- a/appload.pro
++++ b/appload.pro
+@@ -1,14 +1,18 @@
+-QT     += core gui qml quickcontrols2
++QT     += core gui qml quick quickcontrols2
++CONFIG += c++17
+ 
+ TARGET = appload
+ TEMPLATE = app
+ 
+ SOURCES +=  src/main.cpp src/management.cpp src/AppLoad.cpp src/AppLoadCoordinator.cpp src/library.cpp src/libraryexternals.cpp \
+             src/qtfb/fbmanagement.cpp src/qtfb/FBController.cpp \
+-            src/keyboard/layout.cpp
++            src/keyboard/layout.cpp \
++            src/nativeink/NativeInkInput.cpp src/nativeink/NativeInkIpcServer.cpp src/nativeink/NativeInkOverlay.cpp
+ 
+ HEADERS +=  src/AppLoad.h src/AppLoadCoordinator.h src/library.h src/AppLibrary.h \
+-            src/qtfb/FBController.h src/qtfb/fbmanagement.h \
+-            src/keyboard/layout.h src/Launcher.h src/EmuOnly.h
++            src/qtfb/FBController.h src/qtfb/fbmanagement.h src/qtfb/ScaledRect.h \
++            src/keyboard/layout.h src/Launcher.h src/EmuOnly.h \
++            src/nativeink/NativeInkProtocol.h src/nativeink/NativeInkGeometry.h \
++            src/nativeink/NativeInkInput.h src/nativeink/NativeInkIpcServer.h src/nativeink/NativeInkOverlay.h
+ 
+ RESOURCES += resources/resources.qrc
+diff --git a/docs/PHASE6N1_BUILD.md b/docs/PHASE6N1_BUILD.md
+new file mode 100644
+index 0000000..16de8f8
+--- /dev/null
++++ b/docs/PHASE6N1_BUILD.md
+@@ -0,0 +1,66 @@
++# Phase 6N-1 AppLoad build and verification
++
++## Baseline
++
++```sh
++git switch --detach v0.5.3
++git switch -c spike/phase-6n1-native-ink
++```
++
++The POC must remain based on commit
++`5bb34a362f09f753f18bd6261558f8e2737aacdb`. Do not merge current AppLoad
++`master` or update Xovi/QTFB behavior wholesale.
++
++## Host-verifiable tests
++
++These tests need only a C++17 compiler and do not access a device:
++
++```sh
++chmod +x tests/run-host-tests.sh
++./tests/run-host-tests.sh
++```
++
++They verify the protocol ABI/bounds, dirty-region/hit-test geometry, and the
++v0.5.3 scaled partial-update correction—including one-pixel rectangles that
++previously collapsed to zero.
++
++## Target AppLoad build
++
++AppLoad requires Linux and the correct reMarkable AArch64 SDK/toolchain. The
++official reMarkable developer documentation states that Qt Quick target builds
++require Linux and the matching device SDK. Do not build with macOS Qt or an
++unrelated firmware SDK.
++
++Using the AppLoad release-build container on an isolated Linux builder:
++
++```sh
++git clone https://github.com/asivery/xovi.git /work/xovi
++export XOVI_REPO=/work/xovi
++
++# Enter eeems/remarkable-toolchain:latest-rmpp using the builder's approved
++# container runner, then inside the container:
++. /opt/codex/*/*/environment-setup-*
++apt-get update
++apt-get install -y qt6-base-dev
++ln -sf /usr/lib/qt6/libexec/rcc /usr/local/bin/rcc
++cd /work/rm-appload/xovi
++./make.sh
++```
++
++Expected output:
++
++```text
++xovi/appload.so
++```
++
++Do not build or replace the QTFB shim for the first POC; its source is
++unchanged. Record the compiler environment, source commit, artifact size, and
++SHA-256. Run `readelf -d` and reject unexpected dependencies before any device
++approval request.
++
++## Current workspace build status
++
++- Host protocol/geometry/scaling harness: buildable and required to pass.
++- AppLoad Qt/Xovi `.so`: requires the missing Linux/reMarkable SDK and was not
++  produced on the macOS study host.
++- Device installation: prohibited until explicit approval.
+diff --git a/docs/PHASE6N1_NATIVE_INK_PROTOCOL.md b/docs/PHASE6N1_NATIVE_INK_PROTOCOL.md
+new file mode 100644
+index 0000000..46937f9
+--- /dev/null
++++ b/docs/PHASE6N1_NATIVE_INK_PROTOCOL.md
+@@ -0,0 +1,137 @@
++# Phase 6N-1 native ink protocol
++
++Status: source proof-of-concept based exactly on AppLoad v0.5.3. The legacy
++QTFB packet ABI is unchanged. Native ink is opt-in through
++`"nativeInk": true` in an external QTFB application's manifest.
++
++## Why this is a side protocol
++
++QTFB v0.5.3's `ServerMessage` is a fixed-size ABI used by existing clients.
++Making it larger would risk truncation and break every client that receives
++`sizeof(ServerMessage)`. The POC therefore keeps `/tmp/qtfb.sock` compatible
++and adds one bounded `SOCK_SEQPACKET` socket per opted-in QTFB framebuffer:
++
++```text
++/tmp/appload-native-ink-<QTFB_KEY>.sock
++```
++
++The socket is created with mode `0600`; the server checks same-UID peer
++credentials where the platform exposes `SO_PEERCRED`. It carries only native
++ink transactions and aggregate metrics. Normal finger gestures continue on
++the legacy QTFB path while Marker proximity is false.
++
++## Raw input preservation
++
++`NativeInkInput` opens `/dev/input/event2` and `/dev/input/event3` with
++`O_RDONLY | O_NONBLOCK | O_CLOEXEC`. It never calls `EVIOCGRAB`, never writes
++to an input node, and never changes an event clock.
++
++Pen frames retain, in memory:
++
++- `BTN_TOOL_PEN` / `BTN_TOOL_RUBBER` identity;
++- `BTN_TOUCH` contact;
++- `ABS_PRESSURE`, `ABS_DISTANCE`, `ABS_TILT_X/Y`;
++- normalized position;
++- original `input_event.time` and a local monotonic receipt timestamp;
++- a monotonic in-process sequence.
++
++Touch frames retain up to ten slots with tracking/contact state, major/minor
++when advertised, pressure, distance, tool type, normalized position, original
++timestamp, receipt timestamp, and sequence. Touch frames stay within the
++native bridge for the POC: QTFB finger events are forwarded only when Marker
++proximity is false and suppressed as a group while proximity is true. No raw
++touch or pen coordinates are written to diagnostics.
++
++## Wire format
++
++The ABI is little-endian, packed, and versioned. `Header` is 48 bytes and
++`Point` is 24 bytes. Host tests assert both sizes.
++
++```text
++Header {
++  magic = "INK1"
++  protocol_major = 1
++  protocol_minor = 0
++  message_type
++  header_bytes = 48
++  payload_bytes <= 32768
++  sequence
++  original_event_timestamp_ns
++  stroke_id
++  flags
++  point_count <= 128
++}
++
++Point {
++  x, y                    # transient screen-space float
++  original_timestamp_ns
++  pressure_u16
++  tilt_x_i16, tilt_y_i16
++  tool                    # PEN or REAR_ERASER
++}
++```
++
++Message types:
++
++| Type | Purpose |
++| --- | --- |
++| `HELLO` | Screen size, input capabilities, hard bounds |
++| `STROKE_BEGIN` | Begin one black-pen transaction |
++| `STROKE_POINTS` | Up to 128 points; KOReader buffers but does not paint live |
++| `STROKE_END` | Commit and persist through existing InkService/InkStore |
++| `ERASE_BEGIN` | Begin one grouped rear-eraser transaction |
++| `ERASE_POINTS` | Batched eraser path; KOReader mutates vectors without per-point repaint |
++| `ERASE_END` | Persist the grouped deletion |
++| `METRICS` | Aggregate counters/timing only; sent after each completed contact |
++| `GOODBYE` | Session teardown |
++
++Hard bounds:
++
++- 32 KiB payload per packet;
++- 128 points per packet;
++- 10,000 points per stroke in both sender and receiver;
++- 1,024 queued native frames before oldest-frame drop and counter increment;
++- 32 messages drained per 10 ms KOReader poll;
++- one same-UID client.
++
++KOReader commits only on `STROKE_END`. Duplicate persistent stroke IDs are
++idempotent. An incomplete, oversized, out-of-order, or unmatched transaction
++is discarded without changing the sidecar.
++
++## Input gating
++
++When `nativeInk` is active:
++
++- all generic AppLoad mouse/pen forwarding is suppressed so raw Marker and
++  rear-eraser events cannot reach KOReader twice;
++- all AppLoad touch forwarding is suppressed while raw Marker/rear proximity
++  is active;
++- normal AppLoad finger forwarding resumes immediately on proximity leave.
++
++This is deliberately conservative. Touch-major/pressure classification can be
++added after clean physical distributions exist, without changing the wire ABI.
++
++## Presentation and persistence split
++
++The native `QQuickPaintedItem` owns live black ink, native current-session
++rear erasure, dirty-rectangle union, and update submission. It never requests
++a QTFB or full/quality repaint.
++
++KOReader polls the side socket and writes only completed transactions using the
++existing `InkStroke`, `InkAnchor`, and `InkStore` schema. It performs no
++per-point UIManager repaint. The native overlay retains current-session strokes
++so persistence cannot stall live presentation.
++
++## Diagnostics
++
++The native side maintains aggregate counts and durations for:
++
++- raw frames received;
++- samples rendered, handed to KOReader, and dropped;
++- display updates submitted/coalesced;
++- QPainter call count and cumulative paint time;
++- raw-event-to-receipt, receipt-to-update-submit, and raw-event-to-submit time
++  when the raw event clock is comparable to `CLOCK_MONOTONIC`.
++
++No coordinate, point payload, text, or raw event sequence appears in the
++diagnostic summary. Optical pen-to-visible latency remains a camera measurement.
+diff --git a/resources/qml/appload.qml b/resources/qml/appload.qml
+index 77d4c19..bd77a09 100644
+--- a/resources/qml/appload.qml
++++ b/resources/qml/appload.qml
+@@ -59,6 +59,7 @@ Rectangle {
+             win.supportsScaling = modelData.supportsScaling;
+             win.virtualKeyboardLayout = modelData.virtualKeyboardLayout;
+             win.disablesWindowedMode = modelData.disablesWindowedMode;
++            win.nativeInkEnabled = modelData.nativeInkEnabled;
+ 
+             win.virtualKeyboardRef = _appLoadView.virtualKeyboardRef;
+ 
+diff --git a/resources/qml/window.qml b/resources/qml/window.qml
+index e8b9c92..beef188 100644
+--- a/resources/qml/window.qml
++++ b/resources/qml/window.qml
+@@ -3,6 +3,7 @@ import QtQuick.Window 2.2
+ import QtQuick.Controls 2.5
+ import net.asivery.AppLoad 1.0
+ import net.asivery.Framebuffer 1.0
++import net.asivery.NativeInk 1.0
+ 
+ FocusScope {
+     id: root
+@@ -18,6 +19,7 @@ FocusScope {
+     property int scaledContentWidth: 0
+     property int scaledContentHeight: 0
+     property bool disablesWindowedMode: false
++    property bool nativeInkEnabled: false
+     implicitWidth: 0
+     implicitHeight: 0
+ 
+@@ -392,6 +394,8 @@ FocusScope {
+             allowScaling: true
+             framebufferID: qtfbKey
+             focus: qtfbKey != -1
++            suppressPenInput: nativeInkOverlay.sessionActive
++            suppressTouchInput: nativeInkOverlay.sessionActive && nativeInkOverlay.markerInProximity
+ 
+             onActiveChanged: () => {
+                 if(!windowCanvas.active) {
+@@ -403,6 +407,19 @@ FocusScope {
+             onDragDown: () => {
+                 swipeFromTheTop();
+             }
++
++            onContentReplaced: () => {
++                if(nativeInkOverlay.sessionActive) nativeInkOverlay.clearPreview();
++            }
++        }
++
++        NativeInkOverlay {
++            id: nativeInkOverlay
++            anchors.fill: windowCanvas
++            z: 1000
++            visible: sessionActive && windowCanvas.active
++            sessionEnabled: root.nativeInkEnabled && root.qtfbKey != -1 && windowCanvas.active
++            framebufferID: root.qtfbKey
+         }
+ 
+         AppLoadCoordinator {
+diff --git a/src/AppLibrary.h b/src/AppLibrary.h
+index 18a82b3..a5d8728 100644
+--- a/src/AppLibrary.h
++++ b/src/AppLibrary.h
+@@ -30,6 +30,7 @@ class AppLoadApplication : public QObject {
+     Q_PROPERTY(int externalType READ externalType) // 0 - not external, 1 - external (non-graphics), 2 - external (qtfb)
+     Q_PROPERTY(QString aspectRatio READ aspectRatio CONSTANT)
+     Q_PROPERTY(bool disablesWindowedMode READ disablesWindowedMode CONSTANT)
++    Q_PROPERTY(bool nativeInkEnabled READ nativeInkEnabled CONSTANT)
+     Q_PROPERTY(const appload::vk::Layout *const virtualKeyboardLayout READ virtualKeyboardLayout CONSTANT)
+ 
+ public:
+@@ -44,6 +45,7 @@ public:
+         int externalType,
+         appload::library::AspectRatio aspectRatio,
+         bool disablesWindowedMode,
++        bool nativeInkEnabled,
+         const appload::vk::Layout *vkLayout,
+         QObject *parent = nullptr
+     ):
+@@ -56,6 +58,7 @@ public:
+         _externalType(externalType),
+         _aspectRatio(aspectRatio),
+         _disablesWindowedMode(disablesWindowedMode),
++        _nativeInkEnabled(nativeInkEnabled),
+         _virtualKeyboardLayout(vkLayout) {}
+ 
+     QString id() const { return _id; }
+@@ -67,6 +70,7 @@ public:
+     bool canHaveMultipleFrontends() const { return _canHaveMultipleFrontends; }
+     int externalType() const { return _externalType; }
+     bool disablesWindowedMode() const { return _disablesWindowedMode; }
++    bool nativeInkEnabled() const { return _nativeInkEnabled; }
+ 
+ private:
+     QString _id;
+@@ -78,6 +82,7 @@ private:
+     int _externalType;
+     appload::library::AspectRatio _aspectRatio;
+     bool _disablesWindowedMode;
++    bool _nativeInkEnabled;
+     appload::vk::Layout const *_virtualKeyboardLayout;
+ };
+ 
+@@ -144,6 +149,7 @@ public:
+                                                         INTERNAL,
+                                                         appload::library::AspectRatio::AUTO,
+                                                         false,
++                                                        false,
+                                                         NULL,
+                                                         this));
+         }
+@@ -156,6 +162,7 @@ public:
+                                                         entry.second->isQTFB() ? EXTERNAL_QTFB : EXTERNAL_NOGUI,
+                                                         entry.second->getAspectRatio(),
+                                                         entry.second->disablesWindowedMode(),
++                                                        entry.second->nativeInkEnabled(),
+                                                         entry.second->getVirtualKeyboardLayout(),
+                                                         this));
+         }
+diff --git a/src/library.h b/src/library.h
+index fdcffd4..de159bb 100644
+--- a/src/library.h
++++ b/src/library.h
+@@ -50,6 +50,7 @@ namespace appload::library {
+         bool isQTFB() const;
+         AspectRatio getAspectRatio() const;
+         bool disablesWindowedMode() const;
++        bool nativeInkEnabled() const;
+         bool supportsVirtualKeyboard() const;
+         const appload::vk::Layout *getVirtualKeyboardLayout() const;
+ 
+@@ -66,6 +67,7 @@ namespace appload::library {
+         std::map<QString, QString> environment;
+         bool _isQTFB;
+         bool _disablesWindowedMode;
++        bool _nativeInkEnabled = false;
+         const appload::vk::Layout *_virtualKeyboardLayout;
+         AspectRatio aspectRatio;
+ 
+diff --git a/src/libraryexternals.cpp b/src/libraryexternals.cpp
+index 35a8982..f1edbbc 100644
+--- a/src/libraryexternals.cpp
++++ b/src/libraryexternals.cpp
+@@ -53,6 +53,7 @@ void appload::library::ExternalApplication::parseManifest() {
+     // Optional:
+     _isQTFB = jsonObject.value("qtfb").toBool(false);
+     _disablesWindowedMode = jsonObject.value("disablesWindowedMode").toBool(false);
++    _nativeInkEnabled = _isQTFB && jsonObject.value("nativeInk").toBool(false);
+     bool supportsVirtualKeyboard = jsonObject.value("supportsVirtualKeyboard").toBool(false);
+     if(supportsVirtualKeyboard) {
+         this->_virtualKeyboardLayout = appload::library::defaultLayout;
+@@ -141,6 +142,10 @@ bool appload::library::ExternalApplication::isQTFB() const {
+     return _isQTFB;
+ }
+ 
++bool appload::library::ExternalApplication::nativeInkEnabled() const {
++    return _nativeInkEnabled;
++}
++
+ bool appload::library::ExternalApplication::disablesWindowedMode() const {
+     return _disablesWindowedMode;
+ }
+diff --git a/src/main.cpp b/src/main.cpp
+index 2bcd363..c5f2762 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include "qtfb/FBController.h"
+ #include "qtfb/fbmanagement.h"
++#include "nativeink/NativeInkOverlay.h"
+ 
+ #include <dlfcn.h>
+ 
+@@ -63,6 +64,7 @@ int main(int argc, char *argv[])
+     qmlRegisterType<AppLoadLibrary>("net.asivery.AppLoad", 1, 0, "AppLoadLibrary");
+     qmlRegisterType<AppLoadApplication>("net.asivery.AppLoad", 1, 0, "AppLoadApplication");
+     qmlRegisterType<FBController>("net.asivery.Framebuffer", 1, 0, "FBController");
++    qmlRegisterType<NativeInkOverlay>("net.asivery.NativeInk", 1, 0, "NativeInkOverlay");
+     qmlRegisterSingletonType<AppLoadLauncher>("net.asivery.AppLoad", 1, 0, "AppLoadLauncher", &AppLoadLauncher::qmlSingleton);
+     qmlRegisterSingletonType<AppLoadEmuOnly>("net.asivery.AppLoad", 1, 0, "AppLoadEmuOnly", &AppLoadEmuOnly::qmlSingleton);
+     engine.load(QUrl(QStringLiteral("./_start.qml")));
+diff --git a/src/nativeink/NativeInkGeometry.h b/src/nativeink/NativeInkGeometry.h
+new file mode 100644
+index 0000000..c4f14d7
+--- /dev/null
++++ b/src/nativeink/NativeInkGeometry.h
+@@ -0,0 +1,88 @@
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++#include <vector>
++
++namespace nativeink {
++
++struct PointF {
++    float x = 0.0F;
++    float y = 0.0F;
++};
++
++struct RectF {
++    float x = 0.0F;
++    float y = 0.0F;
++    float width = 0.0F;
++    float height = 0.0F;
++
++    bool valid() const { return width > 0.0F && height > 0.0F; }
++};
++
++inline RectF unite(const RectF &left, const RectF &right)
++{
++    if (!left.valid()) return right;
++    if (!right.valid()) return left;
++    const float x0 = std::min(left.x, right.x);
++    const float y0 = std::min(left.y, right.y);
++    const float x1 = std::max(left.x + left.width, right.x + right.width);
++    const float y1 = std::max(left.y + left.height, right.y + right.height);
++    return {x0, y0, x1 - x0, y1 - y0};
++}
++
++inline RectF segmentBounds(const PointF &a, const PointF &b, float radius, float margin = 2.0F)
++{
++    const float inset = std::max(0.0F, radius) + std::max(0.0F, margin);
++    const float x0 = std::min(a.x, b.x) - inset;
++    const float y0 = std::min(a.y, b.y) - inset;
++    const float x1 = std::max(a.x, b.x) + inset;
++    const float y1 = std::max(a.y, b.y) + inset;
++    return {x0, y0, x1 - x0, y1 - y0};
++}
++
++inline float pointToSegmentDistanceSquared(const PointF &point, const PointF &a, const PointF &b)
++{
++    const float abX = b.x - a.x;
++    const float abY = b.y - a.y;
++    const float lengthSquared = abX * abX + abY * abY;
++    if (lengthSquared <= 1.0e-8F) {
++        const float dx = point.x - a.x;
++        const float dy = point.y - a.y;
++        return dx * dx + dy * dy;
++    }
++    const float projection = std::clamp(
++        ((point.x - a.x) * abX + (point.y - a.y) * abY) / lengthSquared,
++        0.0F, 1.0F);
++    const float projectedX = a.x + projection * abX;
++    const float projectedY = a.y + projection * abY;
++    const float dx = point.x - projectedX;
++    const float dy = point.y - projectedY;
++    return dx * dx + dy * dy;
++}
++
++inline bool strokeHit(const std::vector<PointF> &points, const PointF &point, float radius)
++{
++    if (points.empty()) return false;
++    const float radiusSquared = radius * radius;
++    if (points.size() == 1U)
++        return pointToSegmentDistanceSquared(point, points.front(), points.front()) <= radiusSquared;
++    for (std::size_t i = 1; i < points.size(); ++i) {
++        if (pointToSegmentDistanceSquared(point, points[i - 1U], points[i]) <= radiusSquared)
++            return true;
++    }
++    return false;
++}
++
++inline RectF strokeBounds(const std::vector<PointF> &points, float radius, float margin = 2.0F)
++{
++    RectF result;
++    if (points.empty()) return result;
++    if (points.size() == 1U)
++        return segmentBounds(points.front(), points.front(), radius, margin);
++    for (std::size_t i = 1; i < points.size(); ++i)
++        result = unite(result, segmentBounds(points[i - 1U], points[i], radius, margin));
++    return result;
++}
++
++} // namespace nativeink
+diff --git a/src/nativeink/NativeInkInput.cpp b/src/nativeink/NativeInkInput.cpp
+new file mode 100644
+index 0000000..cfae8ef
+--- /dev/null
++++ b/src/nativeink/NativeInkInput.cpp
+@@ -0,0 +1,254 @@
++#include "NativeInkInput.h"
++
++#include <algorithm>
++#include <cerrno>
++#include <cstring>
++#include <fcntl.h>
++#include <linux/input.h>
++#include <poll.h>
++#include <sys/ioctl.h>
++#include <time.h>
++#include <unistd.h>
++#include <utility>
++
++namespace nativeink {
++
++namespace {
++
++constexpr std::size_t kEventsPerRead = 128U;
++
++int openReadOnlyEventNode(const std::string &path)
++{
++    return ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
++}
++
++} // namespace
++
++NativeInkInput::NativeInkInput() = default;
++
++NativeInkInput::~NativeInkInput()
++{
++    stop();
++}
++
++bool NativeInkInput::start(const std::string &penPath, const std::string &touchPath,
++                           PenCallback penCallback, TouchCallback touchCallback)
++{
++    if (running()) return true;
++    lastError_.clear();
++    capabilities_ = 0;
++    penFd_ = openReadOnlyEventNode(penPath);
++    if (penFd_ < 0) {
++        lastError_ = "open_pen_failed:" + std::to_string(errno);
++        return false;
++    }
++    touchFd_ = openReadOnlyEventNode(touchPath);
++    if (touchFd_ < 0) {
++        lastError_ = "open_touch_failed:" + std::to_string(errno);
++        ::close(penFd_);
++        penFd_ = -1;
++        return false;
++    }
++    if (!configurePen() || !configureTouch()) {
++        ::close(penFd_);
++        ::close(touchFd_);
++        penFd_ = touchFd_ = -1;
++        return false;
++    }
++
++    penCallback_ = std::move(penCallback);
++    touchCallback_ = std::move(touchCallback);
++    running_.store(true);
++    thread_ = std::thread([this]() { readerLoop(); });
++    return true;
++}
++
++void NativeInkInput::stop()
++{
++    running_.store(false);
++    if (thread_.joinable()) thread_.join();
++    if (penFd_ >= 0) ::close(penFd_);
++    if (touchFd_ >= 0) ::close(touchFd_);
++    penFd_ = touchFd_ = -1;
++    penCallback_ = {};
++    touchCallback_ = {};
++}
++
++NativeInkInput::AxisRange NativeInkInput::queryAxis(int fd, unsigned axis)
++{
++    struct input_absinfo information {};
++    if (::ioctl(fd, EVIOCGABS(axis), &information) < 0)
++        return {};
++    AxisRange range;
++    range.minimum = information.minimum;
++    range.maximum = information.maximum > information.minimum
++        ? information.maximum : information.minimum + 1;
++    range.available = true;
++    return range;
++}
++
++bool NativeInkInput::configurePen()
++{
++    penX_ = queryAxis(penFd_, ABS_X);
++    penY_ = queryAxis(penFd_, ABS_Y);
++    penPressure_ = queryAxis(penFd_, ABS_PRESSURE);
++    if (!penX_.available || !penY_.available) {
++        lastError_ = "pen_axes_unavailable";
++        return false;
++    }
++    capabilities_ |= CapabilityPen | CapabilityRearEraser;
++    if (penPressure_.available) capabilities_ |= CapabilityPressure;
++    if (queryAxis(penFd_, ABS_DISTANCE).available) capabilities_ |= CapabilityDistance;
++    if (queryAxis(penFd_, ABS_TILT_X).available && queryAxis(penFd_, ABS_TILT_Y).available)
++        capabilities_ |= CapabilityTilt;
++    return true;
++}
++
++bool NativeInkInput::configureTouch()
++{
++    touchX_ = queryAxis(touchFd_, ABS_MT_POSITION_X);
++    touchY_ = queryAxis(touchFd_, ABS_MT_POSITION_Y);
++    if (!touchX_.available || !touchY_.available) {
++        lastError_ = "touch_axes_unavailable";
++        return false;
++    }
++    if (queryAxis(touchFd_, ABS_MT_TOUCH_MAJOR).available)
++        capabilities_ |= CapabilityTouchMajor;
++    if (queryAxis(touchFd_, ABS_MT_PRESSURE).available)
++        capabilities_ |= CapabilityTouchPressure;
++    if (queryAxis(touchFd_, ABS_MT_TOOL_TYPE).available)
++        capabilities_ |= CapabilityTouchToolType;
++    return true;
++}
++
++float NativeInkInput::normalize(int value, const AxisRange &range)
++{
++    if (!range.available || range.maximum <= range.minimum) return 0.0F;
++    const float result = static_cast<float>(value - range.minimum)
++        / static_cast<float>(range.maximum - range.minimum);
++    return std::clamp(result, 0.0F, 1.0F);
++}
++
++std::uint64_t NativeInkInput::eventTimestampNs(long seconds, long microseconds)
++{
++    if (seconds < 0 || microseconds < 0) return 0;
++    return static_cast<std::uint64_t>(seconds) * UINT64_C(1000000000)
++        + static_cast<std::uint64_t>(microseconds) * UINT64_C(1000);
++}
++
++std::uint64_t NativeInkInput::monotonicNs()
++{
++    struct timespec now {};
++    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
++    return static_cast<std::uint64_t>(now.tv_sec) * UINT64_C(1000000000)
++        + static_cast<std::uint64_t>(now.tv_nsec);
++}
++
++void NativeInkInput::readerLoop()
++{
++    struct pollfd descriptors[2] = {
++        {penFd_, POLLIN, 0},
++        {touchFd_, POLLIN, 0},
++    };
++    std::array<struct input_event, kEventsPerRead> events {};
++
++    while (running_.load()) {
++        const int ready = ::poll(descriptors, 2, 100);
++        if (ready < 0) {
++            if (errno == EINTR) continue;
++            lastError_ = "poll_failed:" + std::to_string(errno);
++            break;
++        }
++
++        if ((descriptors[0].revents & POLLIN) != 0) {
++            const ssize_t bytes = ::read(penFd_, events.data(), sizeof(events));
++            const std::size_t count = bytes > 0
++                ? static_cast<std::size_t>(bytes) / sizeof(struct input_event) : 0U;
++            for (std::size_t index = 0; index < count; ++index) {
++                const auto &event = events[index];
++                if (event.type == EV_ABS) {
++                    switch (event.code) {
++                    case ABS_X: rawPenX_ = event.value; break;
++                    case ABS_Y: rawPenY_ = event.value; break;
++                    case ABS_PRESSURE: rawPressure_ = event.value; break;
++                    case ABS_DISTANCE: rawDistance_ = event.value; break;
++                    case ABS_TILT_X: rawTiltX_ = event.value; break;
++                    case ABS_TILT_Y: rawTiltY_ = event.value; break;
++                    default: break;
++                    }
++                } else if (event.type == EV_KEY) {
++                    if (event.code == BTN_TOOL_PEN) penTool_ = event.value != 0;
++                    else if (event.code == BTN_TOOL_RUBBER) rubberTool_ = event.value != 0;
++                    else if (event.code == BTN_TOUCH) penContact_ = event.value != 0;
++                } else if (event.type == EV_SYN && event.code == SYN_REPORT && penCallback_) {
++                    PenSample sample;
++                    sample.normalizedX = normalize(rawPenX_, penX_);
++                    sample.normalizedY = normalize(rawPenY_, penY_);
++                    sample.eventTimestampNs = eventTimestampNs(event.time.tv_sec, event.time.tv_usec);
++                    sample.receiptTimestampNs = monotonicNs();
++                    sample.sequence = ++sequence_;
++                    sample.pressure = static_cast<std::uint16_t>(std::clamp(rawPressure_, 0, 65535));
++                    sample.tiltX = static_cast<std::int16_t>(std::clamp(rawTiltX_, -32768, 32767));
++                    sample.tiltY = static_cast<std::int16_t>(std::clamp(rawTiltY_, -32768, 32767));
++                    sample.distance = static_cast<std::uint32_t>(std::max(rawDistance_, 0));
++                    sample.tool = rubberTool_ ? Tool::RearEraser : penTool_ ? Tool::Pen : Tool::None;
++                    sample.proximity = penTool_ || rubberTool_;
++                    sample.contact = penContact_ && sample.proximity;
++                    penCallback_(sample);
++                }
++            }
++        }
++
++        if ((descriptors[1].revents & POLLIN) != 0) {
++            const ssize_t bytes = ::read(touchFd_, events.data(), sizeof(events));
++            const std::size_t count = bytes > 0
++                ? static_cast<std::size_t>(bytes) / sizeof(struct input_event) : 0U;
++            for (std::size_t index = 0; index < count; ++index) {
++                const auto &event = events[index];
++                if (event.type == EV_ABS) {
++                    if (event.code == ABS_MT_SLOT) {
++                        currentTouchSlot_ = std::clamp(event.value, 0, static_cast<int>(kMaxTouchSlots - 1U));
++                    } else {
++                        auto &slot = touchSlots_[static_cast<std::size_t>(currentTouchSlot_)];
++                        switch (event.code) {
++                        case ABS_MT_TRACKING_ID: slot.active = event.value >= 0; slot.changed = true; break;
++                        case ABS_MT_POSITION_X: slot.rawX = event.value; slot.changed = true; break;
++                        case ABS_MT_POSITION_Y: slot.rawY = event.value; slot.changed = true; break;
++                        case ABS_MT_TOUCH_MAJOR: slot.touchMajor = event.value; slot.changed = true; break;
++                        case ABS_MT_TOUCH_MINOR: slot.touchMinor = event.value; slot.changed = true; break;
++                        case ABS_MT_PRESSURE: slot.pressure = event.value; slot.changed = true; break;
++                        case ABS_MT_DISTANCE: slot.distance = event.value; slot.changed = true; break;
++                        case ABS_MT_TOOL_TYPE: slot.toolType = event.value; slot.changed = true; break;
++                        default: break;
++                        }
++                    }
++                } else if (event.type == EV_SYN && event.code == SYN_REPORT && touchCallback_) {
++                    TouchFrame frame;
++                    frame.eventTimestampNs = eventTimestampNs(event.time.tv_sec, event.time.tv_usec);
++                    frame.receiptTimestampNs = monotonicNs();
++                    frame.sequence = ++sequence_;
++                    for (std::size_t slotIndex = 0; slotIndex < touchSlots_.size(); ++slotIndex) {
++                        auto &slot = touchSlots_[slotIndex];
++                        if (!slot.changed) continue;
++                        frame.changedContacts.push_back(TouchContact{
++                            static_cast<std::uint8_t>(slotIndex),
++                            slot.active,
++                            normalize(slot.rawX, touchX_),
++                            normalize(slot.rawY, touchY_),
++                            static_cast<std::uint16_t>(std::clamp(slot.touchMajor, 0, 65535)),
++                            static_cast<std::uint16_t>(std::clamp(slot.touchMinor, 0, 65535)),
++                            static_cast<std::uint16_t>(std::clamp(slot.pressure, 0, 65535)),
++                            static_cast<std::uint16_t>(std::clamp(slot.distance, 0, 65535)),
++                            static_cast<std::uint16_t>(std::clamp(slot.toolType, 0, 65535)),
++                        });
++                        slot.changed = false;
++                    }
++                    if (!frame.changedContacts.empty()) touchCallback_(frame);
++                }
++            }
++        }
++    }
++    running_.store(false);
++}
++
++} // namespace nativeink
+diff --git a/src/nativeink/NativeInkInput.h b/src/nativeink/NativeInkInput.h
+new file mode 100644
+index 0000000..88bd20e
+--- /dev/null
++++ b/src/nativeink/NativeInkInput.h
+@@ -0,0 +1,123 @@
++#pragma once
++
++#include "NativeInkProtocol.h"
++
++#include <array>
++#include <atomic>
++#include <cstdint>
++#include <functional>
++#include <string>
++#include <thread>
++#include <vector>
++
++namespace nativeink {
++
++struct PenSample {
++    float normalizedX = 0.0F;
++    float normalizedY = 0.0F;
++    std::uint64_t eventTimestampNs = 0;
++    std::uint64_t receiptTimestampNs = 0;
++    std::uint64_t sequence = 0;
++    std::uint16_t pressure = 0;
++    std::int16_t tiltX = 0;
++    std::int16_t tiltY = 0;
++    std::uint32_t distance = 0;
++    Tool tool = Tool::None;
++    bool proximity = false;
++    bool contact = false;
++};
++
++struct TouchContact {
++    std::uint8_t slot = 0;
++    bool active = false;
++    float normalizedX = 0.0F;
++    float normalizedY = 0.0F;
++    std::uint16_t touchMajor = 0;
++    std::uint16_t touchMinor = 0;
++    std::uint16_t pressure = 0;
++    std::uint16_t distance = 0;
++    std::uint16_t toolType = 0;
++};
++
++struct TouchFrame {
++    std::uint64_t eventTimestampNs = 0;
++    std::uint64_t receiptTimestampNs = 0;
++    std::uint64_t sequence = 0;
++    std::vector<TouchContact> changedContacts;
++};
++
++class NativeInkInput {
++public:
++    using PenCallback = std::function<void(const PenSample &)>;
++    using TouchCallback = std::function<void(const TouchFrame &)>;
++
++    NativeInkInput();
++    ~NativeInkInput();
++
++    NativeInkInput(const NativeInkInput &) = delete;
++    NativeInkInput &operator=(const NativeInkInput &) = delete;
++
++    bool start(const std::string &penPath, const std::string &touchPath,
++               PenCallback penCallback, TouchCallback touchCallback);
++    void stop();
++    bool running() const { return running_.load(); }
++    std::uint32_t capabilities() const { return capabilities_; }
++    const std::string &lastError() const { return lastError_; }
++
++private:
++    struct AxisRange {
++        int minimum = 0;
++        int maximum = 1;
++        bool available = false;
++    };
++
++    void readerLoop();
++    bool configurePen();
++    bool configureTouch();
++    static AxisRange queryAxis(int fd, unsigned axis);
++    static float normalize(int value, const AxisRange &range);
++    static std::uint64_t eventTimestampNs(long seconds, long microseconds);
++    static std::uint64_t monotonicNs();
++
++    int penFd_ = -1;
++    int touchFd_ = -1;
++    std::atomic<bool> running_{false};
++    std::thread thread_;
++    PenCallback penCallback_;
++    TouchCallback touchCallback_;
++    std::string lastError_;
++    std::uint32_t capabilities_ = 0;
++    std::uint64_t sequence_ = 0;
++
++    AxisRange penX_;
++    AxisRange penY_;
++    AxisRange penPressure_;
++    AxisRange touchX_;
++    AxisRange touchY_;
++
++    int rawPenX_ = 0;
++    int rawPenY_ = 0;
++    int rawPressure_ = 0;
++    int rawTiltX_ = 0;
++    int rawTiltY_ = 0;
++    int rawDistance_ = 0;
++    bool penTool_ = false;
++    bool rubberTool_ = false;
++    bool penContact_ = false;
++
++    struct TouchSlotState {
++        bool active = false;
++        bool changed = false;
++        int rawX = 0;
++        int rawY = 0;
++        int touchMajor = 0;
++        int touchMinor = 0;
++        int pressure = 0;
++        int distance = 0;
++        int toolType = 0;
++    };
++    std::array<TouchSlotState, kMaxTouchSlots> touchSlots_{};
++    int currentTouchSlot_ = 0;
++};
++
++} // namespace nativeink
+diff --git a/src/nativeink/NativeInkIpcServer.cpp b/src/nativeink/NativeInkIpcServer.cpp
+new file mode 100644
+index 0000000..3bbf0b8
+--- /dev/null
++++ b/src/nativeink/NativeInkIpcServer.cpp
+@@ -0,0 +1,180 @@
++#include "NativeInkIpcServer.h"
++
++#include <cerrno>
++#include <cstring>
++#include <fcntl.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++namespace nativeink {
++
++namespace {
++
++#ifndef MSG_NOSIGNAL
++#define MSG_NOSIGNAL 0
++#endif
++
++int socketFlags()
++{
++    int flags = SOCK_SEQPACKET;
++#ifdef SOCK_NONBLOCK
++    flags |= SOCK_NONBLOCK;
++#endif
++#ifdef SOCK_CLOEXEC
++    flags |= SOCK_CLOEXEC;
++#endif
++    return flags;
++}
++
++void makeNonBlockingAndCloseOnExec(int fd)
++{
++    const int statusFlags = ::fcntl(fd, F_GETFL, 0);
++    if (statusFlags >= 0) ::fcntl(fd, F_SETFL, statusFlags | O_NONBLOCK);
++    const int descriptorFlags = ::fcntl(fd, F_GETFD, 0);
++    if (descriptorFlags >= 0) ::fcntl(fd, F_SETFD, descriptorFlags | FD_CLOEXEC);
++}
++
++} // namespace
++
++NativeInkIpcServer::NativeInkIpcServer() = default;
++
++NativeInkIpcServer::~NativeInkIpcServer()
++{
++    stop();
++}
++
++bool NativeInkIpcServer::start(int framebufferId)
++{
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (listenFd_ >= 0) return true;
++    if (framebufferId < 0) {
++        lastError_ = "invalid_framebuffer_id";
++        return false;
++    }
++    socketPath_ = "/tmp/appload-native-ink-" + std::to_string(framebufferId) + ".sock";
++    struct sockaddr_un address {};
++    if (socketPath_.size() >= sizeof(address.sun_path)) {
++        lastError_ = "socket_path_too_long";
++        return false;
++    }
++
++    listenFd_ = ::socket(AF_UNIX, socketFlags(), 0);
++    if (listenFd_ < 0) {
++        lastError_ = "socket_failed:" + std::to_string(errno);
++        return false;
++    }
++    makeNonBlockingAndCloseOnExec(listenFd_);
++
++    address.sun_family = AF_UNIX;
++    std::memcpy(address.sun_path, socketPath_.c_str(), socketPath_.size() + 1U);
++    ::unlink(socketPath_.c_str());
++    if (::bind(listenFd_, reinterpret_cast<const struct sockaddr *>(&address), sizeof(address)) < 0) {
++        lastError_ = "bind_failed:" + std::to_string(errno);
++        ::close(listenFd_);
++        listenFd_ = -1;
++        return false;
++    }
++    ::chmod(socketPath_.c_str(), S_IRUSR | S_IWUSR);
++    if (::listen(listenFd_, 1) < 0) {
++        lastError_ = "listen_failed:" + std::to_string(errno);
++        ::close(listenFd_);
++        listenFd_ = -1;
++        ::unlink(socketPath_.c_str());
++        return false;
++    }
++    lastError_.clear();
++    return true;
++}
++
++void NativeInkIpcServer::closeClient()
++{
++    if (clientFd_ >= 0) ::close(clientFd_);
++    clientFd_ = -1;
++}
++
++void NativeInkIpcServer::stop()
++{
++    std::lock_guard<std::mutex> lock(mutex_);
++    closeClient();
++    if (listenFd_ >= 0) ::close(listenFd_);
++    listenFd_ = -1;
++    if (!socketPath_.empty()) ::unlink(socketPath_.c_str());
++    socketPath_.clear();
++}
++
++bool NativeInkIpcServer::acceptClient()
++{
++    if (clientFd_ >= 0) return true;
++    if (listenFd_ < 0) return false;
++    clientFd_ = ::accept(listenFd_, nullptr, nullptr);
++    if (clientFd_ < 0) {
++        if (errno != EAGAIN && errno != EWOULDBLOCK)
++            lastError_ = "accept_failed:" + std::to_string(errno);
++        return false;
++    }
++    makeNonBlockingAndCloseOnExec(clientFd_);
++#ifdef SO_PEERCRED
++    struct PeerCredentials {
++        pid_t pid;
++        uid_t uid;
++        gid_t gid;
++    } credentials {};
++    socklen_t credentialBytes = sizeof(credentials);
++    if (::getsockopt(clientFd_, SOL_SOCKET, SO_PEERCRED, &credentials, &credentialBytes) < 0
++        || credentials.uid != ::geteuid()) {
++        lastError_ = "peer_credential_rejected";
++        closeClient();
++        return false;
++    }
++#endif
++    return true;
++}
++
++bool NativeInkIpcServer::send(MessageType type, std::uint64_t sequence,
++                              std::uint64_t timestampNs, std::uint64_t strokeId,
++                              std::uint32_t flags, const void *payload,
++                              std::uint32_t payloadBytes, std::uint32_t pointCount)
++{
++    std::lock_guard<std::mutex> lock(mutex_);
++    Header header;
++    header.messageType = static_cast<std::uint16_t>(type);
++    header.payloadBytes = payloadBytes;
++    header.sequence = sequence;
++    header.timestampNs = timestampNs;
++    header.strokeId = strokeId;
++    header.flags = flags;
++    header.pointCount = pointCount;
++    if (!validateHeader(header) || (payloadBytes > 0U && payload == nullptr)) {
++        lastError_ = "invalid_packet";
++        packetsDropped_++;
++        return false;
++    }
++    if (!acceptClient()) {
++        packetsDropped_++;
++        return false;
++    }
++
++    struct iovec vectors[2] = {
++        {&header, sizeof(header)},
++        {const_cast<void *>(payload), payloadBytes},
++    };
++    struct msghdr message {};
++    message.msg_iov = vectors;
++    message.msg_iovlen = payloadBytes > 0U ? 2U : 1U;
++    const ssize_t sent = ::sendmsg(clientFd_, &message, MSG_DONTWAIT | MSG_NOSIGNAL);
++    if (sent != static_cast<ssize_t>(sizeof(header) + payloadBytes)) {
++        packetsDropped_++;
++        if (sent < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
++            lastError_ = "send_failed:" + std::to_string(errno);
++            closeClient();
++        }
++        return false;
++    }
++    packetsSent_++;
++    return true;
++}
++
++} // namespace nativeink
+diff --git a/src/nativeink/NativeInkIpcServer.h b/src/nativeink/NativeInkIpcServer.h
+new file mode 100644
+index 0000000..6416ec9
+--- /dev/null
++++ b/src/nativeink/NativeInkIpcServer.h
+@@ -0,0 +1,47 @@
++#pragma once
++
++#include "NativeInkProtocol.h"
++
++#include <cstddef>
++#include <cstdint>
++#include <mutex>
++#include <string>
++
++namespace nativeink {
++
++class NativeInkIpcServer {
++public:
++    NativeInkIpcServer();
++    ~NativeInkIpcServer();
++
++    NativeInkIpcServer(const NativeInkIpcServer &) = delete;
++    NativeInkIpcServer &operator=(const NativeInkIpcServer &) = delete;
++
++    bool start(int framebufferId);
++    void stop();
++    bool send(MessageType type, std::uint64_t sequence, std::uint64_t timestampNs,
++              std::uint64_t strokeId, std::uint32_t flags,
++              const void *payload = nullptr, std::uint32_t payloadBytes = 0,
++              std::uint32_t pointCount = 0);
++
++    bool listening() const { return listenFd_ >= 0; }
++    bool connected() const { return clientFd_ >= 0; }
++    const std::string &socketPath() const { return socketPath_; }
++    const std::string &lastError() const { return lastError_; }
++    std::uint64_t packetsSent() const { return packetsSent_; }
++    std::uint64_t packetsDropped() const { return packetsDropped_; }
++
++private:
++    bool acceptClient();
++    void closeClient();
++
++    int listenFd_ = -1;
++    int clientFd_ = -1;
++    std::string socketPath_;
++    std::string lastError_;
++    mutable std::mutex mutex_;
++    std::uint64_t packetsSent_ = 0;
++    std::uint64_t packetsDropped_ = 0;
++};
++
++} // namespace nativeink
+diff --git a/src/nativeink/NativeInkOverlay.cpp b/src/nativeink/NativeInkOverlay.cpp
+new file mode 100644
+index 0000000..d4d3c48
+--- /dev/null
++++ b/src/nativeink/NativeInkOverlay.cpp
+@@ -0,0 +1,494 @@
++#include "NativeInkOverlay.h"
++
++#include <QFile>
++#include <QMetaObject>
++#include <QPainter>
++#include <QPen>
++#include <QRectF>
++#include <QVector>
++#include <QtGlobal>
++
++#include <algorithm>
++#include <cmath>
++#include <time.h>
++#include <utility>
++
++namespace {
++
++QRectF toQRect(const nativeink::RectF &rect)
++{
++    return QRectF(rect.x, rect.y, rect.width, rect.height);
++}
++
++} // namespace
++
++NativeInkOverlay::NativeInkOverlay(QQuickItem *parent)
++    : QQuickPaintedItem(parent)
++{
++    setRenderTarget(QQuickPaintedItem::Image);
++    setOpaquePainting(false);
++    setFillColor(Qt::transparent);
++    setAntialiasing(false);
++    setMipmap(false);
++    setAcceptedMouseButtons(Qt::NoButton);
++    setAcceptTouchEvents(false);
++}
++
++NativeInkOverlay::~NativeInkOverlay()
++{
++    stopSession();
++}
++
++void NativeInkOverlay::setSessionEnabled(bool enabled)
++{
++    if (sessionEnabled_ == enabled) return;
++    sessionEnabled_ = enabled;
++    if (sessionEnabled_) startSession(); else stopSession();
++    emit sessionEnabledChanged();
++}
++
++void NativeInkOverlay::setFramebufferID(int framebufferID)
++{
++    if (framebufferID_ == framebufferID) return;
++    const bool restart = sessionEnabled_;
++    if (restart) stopSession();
++    framebufferID_ = framebufferID;
++    if (restart) startSession();
++    emit framebufferIDChanged();
++}
++
++void NativeInkOverlay::clearPreview()
++{
++    if (contactDown_) return;
++    nativeink::RectF dirty;
++    for (const auto &stroke : completedStrokes_)
++        dirty = nativeink::unite(dirty, nativeink::strokeBounds(pointVector(stroke), kPenWidth * 0.5F));
++    if (!activeStroke_.points.empty())
++        dirty = nativeink::unite(dirty, nativeink::strokeBounds(pointVector(activeStroke_), kPenWidth * 0.5F));
++    completedStrokes_.clear();
++    activeStroke_ = {};
++    pendingPoints_.clear();
++    contactDown_ = false;
++    activeTool_ = nativeink::Tool::None;
++    activeStrokeID_ = 0;
++    if (dirty.valid()) update(toQRect(dirty).intersected(boundingRect()).toAlignedRect());
++}
++
++void NativeInkOverlay::startSession()
++{
++    if (!sessionEnabled_ || framebufferID_ < 0 || input_.running()) return;
++    QFile machine(QStringLiteral("/sys/devices/soc0/machine"));
++    if (!machine.open(QIODevice::ReadOnly)
++        || !machine.readAll().contains("reMarkable Ferrari")) {
++        startupError_ = QStringLiteral("unsupported_model");
++        sessionActive_ = false;
++        emit sessionActiveChanged();
++        emit diagnosticsChanged();
++        return;
++    }
++    startupError_.clear();
++    if (!ipc_.start(framebufferID_)) {
++        startupError_ = QString::fromStdString(ipc_.lastError());
++        sessionActive_ = false;
++        emit sessionActiveChanged();
++        emit diagnosticsChanged();
++        return;
++    }
++    const bool started = input_.start(
++        "/dev/input/event2", "/dev/input/event3",
++        [this](const nativeink::PenSample &sample) { enqueuePen(sample); },
++        [this](const nativeink::TouchFrame &frame) { enqueueTouch(frame); });
++    if (!started) {
++        startupError_ = QString::fromStdString(input_.lastError());
++        sessionActive_ = false;
++        ipc_.stop();
++    } else {
++        sessionActive_ = true;
++    }
++    emit sessionActiveChanged();
++    emit diagnosticsChanged();
++}
++
++void NativeInkOverlay::stopSession()
++{
++    if (input_.running()) input_.stop();
++    nativeink::PenSample finalSample;
++    finalSample.eventTimestampNs = monotonicNs();
++    if (contactDown_) finishContact(finalSample);
++    const auto metrics = metricsSnapshot();
++    ipc_.send(nativeink::MessageType::Metrics, ++messageSequence_, monotonicNs(), 0, 0,
++              &metrics, sizeof(metrics));
++    ipc_.send(nativeink::MessageType::Goodbye, ++messageSequence_, monotonicNs(), 0, 0);
++    ipc_.stop();
++    {
++        std::lock_guard<std::mutex> lock(queueMutex_);
++        eventQueue_.clear();
++    }
++    drainScheduled_.store(false);
++    markerInProximity_ = false;
++    rearEraserSelected_ = false;
++    contactDown_ = false;
++    activeTool_ = nativeink::Tool::None;
++    eraserCursorVisible_ = false;
++    if (sessionActive_) {
++        sessionActive_ = false;
++        emit sessionActiveChanged();
++    }
++    emit markerInProximityChanged();
++    emit rearEraserSelectedChanged();
++    emit diagnosticsChanged();
++}
++
++void NativeInkOverlay::enqueuePen(const nativeink::PenSample &sample)
++{
++    rawSamplesReceived_.fetch_add(1U);
++    QueuedEvent event;
++    event.kind = QueuedEvent::Kind::Pen;
++    event.pen = sample;
++    enqueue(std::move(event));
++}
++
++void NativeInkOverlay::enqueueTouch(const nativeink::TouchFrame &frame)
++{
++    rawSamplesReceived_.fetch_add(1U);
++    QueuedEvent event;
++    event.kind = QueuedEvent::Kind::Touch;
++    event.touch = frame;
++    enqueue(std::move(event));
++}
++
++void NativeInkOverlay::enqueue(QueuedEvent event)
++{
++    {
++        std::lock_guard<std::mutex> lock(queueMutex_);
++        if (eventQueue_.size() >= kMaxQueuedEvents) {
++            eventQueue_.pop_front();
++            samplesDropped_.fetch_add(1U);
++        }
++        eventQueue_.push_back(std::move(event));
++    }
++    if (drainScheduled_.exchange(true)) {
++        displayUpdatesCoalesced_.fetch_add(1U);
++        return;
++    }
++    QMetaObject::invokeMethod(this, [this]() { drainEvents(); }, Qt::QueuedConnection);
++}
++
++void NativeInkOverlay::drainEvents()
++{
++    std::deque<QueuedEvent> pending;
++    {
++        std::lock_guard<std::mutex> lock(queueMutex_);
++        pending.swap(eventQueue_);
++    }
++
++    nativeink::RectF dirty;
++    std::uint64_t newestEventTimestamp = 0;
++    std::uint64_t newestReceiptTimestamp = 0;
++    for (const auto &event : pending) {
++        if (event.kind == QueuedEvent::Kind::Pen) {
++            dirty = nativeink::unite(dirty, processPen(event.pen));
++            newestEventTimestamp = std::max(newestEventTimestamp, event.pen.eventTimestampNs);
++            newestReceiptTimestamp = std::max(newestReceiptTimestamp, event.pen.receiptTimestampNs);
++            if (event.pen.receiptTimestampNs >= event.pen.eventTimestampNs
++                && event.pen.receiptTimestampNs - event.pen.eventTimestampNs <= UINT64_C(10000000000)) {
++                rawToReceiptUs_.fetch_add(
++                    (event.pen.receiptTimestampNs - event.pen.eventTimestampNs) / 1000U);
++                rawToReceiptCount_.fetch_add(1U);
++            }
++        } else {
++            processTouch(event.touch);
++        }
++    }
++
++    if (dirty.valid()) {
++        const QRectF clipped = toQRect(dirty).intersected(boundingRect());
++        if (clipped.isValid() && !clipped.isEmpty()) {
++            update(clipped.toAlignedRect());
++            displayUpdatesSubmitted_.fetch_add(1U);
++            const std::uint64_t submittedAt = monotonicNs();
++            if (newestReceiptTimestamp > 0 && submittedAt >= newestReceiptTimestamp) {
++                receiptToSubmitUs_.fetch_add((submittedAt - newestReceiptTimestamp) / 1000U);
++                receiptToSubmitCount_.fetch_add(1U);
++            }
++            if (newestEventTimestamp > 0 && submittedAt >= newestEventTimestamp
++                && submittedAt - newestEventTimestamp <= UINT64_C(10000000000)) {
++                eventToSubmitUs_.fetch_add((submittedAt - newestEventTimestamp) / 1000U);
++                eventToSubmitCount_.fetch_add(1U);
++            }
++        }
++    }
++
++    drainScheduled_.store(false);
++    {
++        std::lock_guard<std::mutex> lock(queueMutex_);
++        if (!eventQueue_.empty() && !drainScheduled_.exchange(true))
++            QMetaObject::invokeMethod(this, [this]() { drainEvents(); }, Qt::QueuedConnection);
++    }
++    emit diagnosticsChanged();
++}
++
++nativeink::RectF NativeInkOverlay::processPen(const nativeink::PenSample &sample)
++{
++    nativeink::RectF dirty;
++    const bool proximityChanged = markerInProximity_ != sample.proximity;
++    const bool eraserChanged = rearEraserSelected_ != (sample.tool == nativeink::Tool::RearEraser);
++    markerInProximity_ = sample.proximity;
++    rearEraserSelected_ = sample.tool == nativeink::Tool::RearEraser;
++    if (proximityChanged) emit markerInProximityChanged();
++    if (eraserChanged) emit rearEraserSelectedChanged();
++
++    if (eraserCursorVisible_) dirty = nativeink::unite(dirty, eraserCursorBounds());
++    eraserCursor_ = {sample.normalizedX * static_cast<float>(width()),
++                     sample.normalizedY * static_cast<float>(height())};
++    eraserCursorVisible_ = sample.proximity && sample.tool == nativeink::Tool::RearEraser;
++    if (eraserCursorVisible_) dirty = nativeink::unite(dirty, eraserCursorBounds());
++
++    if (sample.contact) {
++        if (!contactDown_ || activeTool_ != sample.tool) {
++            if (contactDown_) dirty = nativeink::unite(dirty, finishContact(sample));
++            dirty = nativeink::unite(dirty, beginContact(sample));
++        }
++        dirty = nativeink::unite(dirty, appendContactPoint(sample));
++    } else if (contactDown_) {
++        dirty = nativeink::unite(dirty, finishContact(sample));
++    }
++    return dirty;
++}
++
++void NativeInkOverlay::processTouch(const nativeink::TouchFrame &frame)
++{
++    Q_UNUSED(frame)
++    // Touch geometry is intentionally retained only in memory. AppLoad's
++    // FBController forwards normal finger gestures while Marker proximity is
++    // false and suppresses the whole touch path while proximity is true.
++}
++
++nativeink::RectF NativeInkOverlay::beginContact(const nativeink::PenSample &sample)
++{
++    contactDown_ = true;
++    activeTool_ = sample.tool;
++    activeStrokeID_ = ++nextStrokeID_;
++    pendingPoints_.clear();
++    activeStroke_ = Stroke{activeStrokeID_, {}};
++    sendHello(sample.eventTimestampNs);
++    const auto type = activeTool_ == nativeink::Tool::RearEraser
++        ? nativeink::MessageType::EraseBegin : nativeink::MessageType::StrokeBegin;
++    ipc_.send(type, ++messageSequence_, sample.eventTimestampNs, activeStrokeID_,
++              toolFlags(activeTool_, nativeink::FlagContact | nativeink::FlagProximity));
++    return {};
++}
++
++nativeink::RectF NativeInkOverlay::appendContactPoint(const nativeink::PenSample &sample)
++{
++    nativeink::Point point;
++    point.x = sample.normalizedX * static_cast<float>(width());
++    point.y = sample.normalizedY * static_cast<float>(height());
++    point.timestampNs = sample.eventTimestampNs;
++    point.pressure = sample.pressure;
++    point.tiltX = sample.tiltX;
++    point.tiltY = sample.tiltY;
++    point.tool = static_cast<std::uint16_t>(sample.tool);
++
++    nativeink::RectF dirty;
++    if (activeTool_ == nativeink::Tool::Pen) {
++        const nativeink::PointF current = pointF(point);
++        const nativeink::PointF previous = activeStroke_.points.empty()
++            ? current : pointF(activeStroke_.points.back());
++        const float dx = current.x - previous.x;
++        const float dy = current.y - previous.y;
++        if (!activeStroke_.points.empty() && dx * dx + dy * dy < 0.25F)
++            return {};
++        activeStroke_.points.push_back(point);
++        dirty = nativeink::segmentBounds(previous, current, kPenWidth * 0.5F);
++    } else if (activeTool_ == nativeink::Tool::RearEraser) {
++        dirty = eraseAt(point);
++    }
++
++    pendingPoints_.push_back(point);
++    samplesRendered_.fetch_add(1U);
++    if (pendingPoints_.size() >= 64U) flushPointBatch(false);
++    return dirty;
++}
++
++nativeink::RectF NativeInkOverlay::finishContact(const nativeink::PenSample &sample)
++{
++    if (!contactDown_) return {};
++    flushPointBatch(true);
++    const auto type = activeTool_ == nativeink::Tool::RearEraser
++        ? nativeink::MessageType::EraseEnd : nativeink::MessageType::StrokeEnd;
++    ipc_.send(type, ++messageSequence_, sample.eventTimestampNs, activeStrokeID_,
++              toolFlags(activeTool_, nativeink::FlagFinalChunk));
++    const auto metrics = metricsSnapshot();
++    ipc_.send(nativeink::MessageType::Metrics, ++messageSequence_, sample.eventTimestampNs,
++              activeStrokeID_, 0, &metrics, sizeof(metrics));
++    nativeink::RectF dirty;
++    if (activeTool_ == nativeink::Tool::Pen && !activeStroke_.points.empty()) {
++        dirty = nativeink::strokeBounds(pointVector(activeStroke_), kPenWidth * 0.5F);
++        completedStrokes_.push_back(std::move(activeStroke_));
++    }
++    activeStroke_ = {};
++    pendingPoints_.clear();
++    contactDown_ = false;
++    activeTool_ = nativeink::Tool::None;
++    activeStrokeID_ = 0;
++    return dirty;
++}
++
++nativeink::RectF NativeInkOverlay::eraseAt(const nativeink::Point &point)
++{
++    nativeink::RectF dirty;
++    const nativeink::PointF target = pointF(point);
++    for (auto iterator = completedStrokes_.begin(); iterator != completedStrokes_.end();) {
++        const auto points = pointVector(*iterator);
++        if (nativeink::strokeHit(points, target, kEraserRadius)) {
++            dirty = nativeink::unite(dirty, nativeink::strokeBounds(points, kPenWidth * 0.5F));
++            iterator = completedStrokes_.erase(iterator);
++        } else {
++            ++iterator;
++        }
++    }
++    return nativeink::unite(dirty, eraserCursorBounds());
++}
++
++nativeink::RectF NativeInkOverlay::eraserCursorBounds() const
++{
++    if (!eraserCursorVisible_) return {};
++    return nativeink::segmentBounds(eraserCursor_, eraserCursor_, kEraserRadius, 3.0F);
++}
++
++void NativeInkOverlay::sendHello(std::uint64_t timestampNs)
++{
++    nativeink::Hello hello;
++    hello.screenWidth = static_cast<std::uint32_t>(std::max(0.0, width()));
++    hello.screenHeight = static_cast<std::uint32_t>(std::max(0.0, height()));
++    hello.capabilities = input_.capabilities();
++    ipc_.send(nativeink::MessageType::Hello, ++messageSequence_, timestampNs, 0,
++              0, &hello, sizeof(hello));
++}
++
++void NativeInkOverlay::flushPointBatch(bool finalChunk)
++{
++    if (pendingPoints_.empty()) return;
++    std::size_t offset = 0;
++    while (offset < pendingPoints_.size()) {
++        const std::size_t count = std::min<std::size_t>(nativeink::kMaxPointsPerPacket,
++                                                        pendingPoints_.size() - offset);
++        const bool finalPacket = finalChunk && offset + count == pendingPoints_.size();
++        const auto type = activeTool_ == nativeink::Tool::RearEraser
++            ? nativeink::MessageType::ErasePoints : nativeink::MessageType::StrokePoints;
++        const bool sent = ipc_.send(type, ++messageSequence_,
++            pendingPoints_[offset + count - 1U].timestampNs, activeStrokeID_,
++            toolFlags(activeTool_, finalPacket ? nativeink::FlagFinalChunk : 0U),
++            pendingPoints_.data() + offset,
++            static_cast<std::uint32_t>(count * sizeof(nativeink::Point)),
++            static_cast<std::uint32_t>(count));
++        if (sent) samplesHandedToClient_.fetch_add(count);
++        else samplesDropped_.fetch_add(count);
++        offset += count;
++    }
++    pendingPoints_.clear();
++}
++
++void NativeInkOverlay::paint(QPainter *painter)
++{
++    const std::uint64_t startedAt = monotonicNs();
++    painter->setRenderHint(QPainter::Antialiasing, false);
++    QPen pen(Qt::black);
++    pen.setWidthF(kPenWidth);
++    pen.setCapStyle(Qt::RoundCap);
++    pen.setJoinStyle(Qt::RoundJoin);
++    painter->setPen(pen);
++
++    auto paintStroke = [painter](const Stroke &stroke) {
++        if (stroke.points.empty()) return;
++        if (stroke.points.size() == 1U) {
++            const auto &point = stroke.points.front();
++            painter->drawPoint(QPointF(point.x, point.y));
++            return;
++        }
++        for (std::size_t index = 1; index < stroke.points.size(); ++index) {
++            const auto &left = stroke.points[index - 1U];
++            const auto &right = stroke.points[index];
++            painter->drawLine(QPointF(left.x, left.y), QPointF(right.x, right.y));
++        }
++    };
++    for (const auto &stroke : completedStrokes_) paintStroke(stroke);
++    if (contactDown_ && activeTool_ == nativeink::Tool::Pen) paintStroke(activeStroke_);
++    if (eraserCursorVisible_) {
++        QPen cursorPen(Qt::black);
++        cursorPen.setWidthF(2.0F);
++        painter->setPen(cursorPen);
++        painter->setBrush(Qt::NoBrush);
++        painter->drawEllipse(QPointF(eraserCursor_.x, eraserCursor_.y),
++                             kEraserRadius, kEraserRadius);
++    }
++
++    paintCalls_.fetch_add(1U);
++    const std::uint64_t finishedAt = monotonicNs();
++    if (finishedAt >= startedAt) paintTimeUs_.fetch_add((finishedAt - startedAt) / 1000U);
++}
++
++nativeink::Metrics NativeInkOverlay::metricsSnapshot() const
++{
++    nativeink::Metrics metrics;
++    metrics.rawSamplesReceived = rawSamplesReceived_.load();
++    metrics.samplesRendered = samplesRendered_.load();
++    metrics.samplesHandedToClient = samplesHandedToClient_.load();
++    metrics.samplesDropped = samplesDropped_.load();
++    metrics.displayUpdatesSubmitted = displayUpdatesSubmitted_.load();
++    metrics.displayUpdatesCoalesced = displayUpdatesCoalesced_.load();
++    metrics.paintCalls = paintCalls_.load();
++    metrics.paintTimeUs = paintTimeUs_.load();
++    metrics.rawToReceiptUs = rawToReceiptUs_.load();
++    metrics.rawToReceiptCount = rawToReceiptCount_.load();
++    metrics.receiptToSubmitUs = receiptToSubmitUs_.load();
++    metrics.receiptToSubmitCount = receiptToSubmitCount_.load();
++    metrics.eventToSubmitUs = eventToSubmitUs_.load();
++    metrics.eventToSubmitCount = eventToSubmitCount_.load();
++    return metrics;
++}
++
++QString NativeInkOverlay::diagnosticsSummary() const
++{
++    const auto metrics = metricsSnapshot();
++    const double meanPaintUs = metrics.paintCalls > 0
++        ? static_cast<double>(metrics.paintTimeUs) / static_cast<double>(metrics.paintCalls) : 0.0;
++    const double meanEventToSubmitUs = metrics.eventToSubmitCount > 0
++        ? static_cast<double>(metrics.eventToSubmitUs) / static_cast<double>(metrics.eventToSubmitCount) : 0.0;
++    const double meanReceiptToSubmitUs = metrics.receiptToSubmitCount > 0
++        ? static_cast<double>(metrics.receiptToSubmitUs) / static_cast<double>(metrics.receiptToSubmitCount) : 0.0;
++    return QStringLiteral("error=%1 raw=%2 rendered=%3 ipc=%4 dropped=%5 updates=%6 coalesced=%7 paint_mean_us=%8 receipt_to_submit_mean_us=%9 event_to_submit_mean_us=%10")
++        .arg(startupError_.isEmpty() ? QStringLiteral("none") : startupError_)
++        .arg(metrics.rawSamplesReceived).arg(metrics.samplesRendered)
++        .arg(metrics.samplesHandedToClient).arg(metrics.samplesDropped)
++        .arg(metrics.displayUpdatesSubmitted).arg(metrics.displayUpdatesCoalesced)
++        .arg(meanPaintUs, 0, 'f', 1).arg(meanReceiptToSubmitUs, 0, 'f', 1)
++        .arg(meanEventToSubmitUs, 0, 'f', 1);
++}
++
++std::uint64_t NativeInkOverlay::monotonicNs()
++{
++    struct timespec now {};
++    if (::clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
++    return static_cast<std::uint64_t>(now.tv_sec) * UINT64_C(1000000000)
++        + static_cast<std::uint64_t>(now.tv_nsec);
++}
++
++std::uint32_t NativeInkOverlay::toolFlags(nativeink::Tool tool, std::uint32_t flags)
++{
++    return flags | (static_cast<std::uint32_t>(tool) << 16U);
++}
++
++nativeink::PointF NativeInkOverlay::pointF(const nativeink::Point &point)
++{
++    return {point.x, point.y};
++}
++
++std::vector<nativeink::PointF> NativeInkOverlay::pointVector(const Stroke &stroke)
++{
++    std::vector<nativeink::PointF> result;
++    result.reserve(stroke.points.size());
++    for (const auto &point : stroke.points) result.push_back(pointF(point));
++    return result;
++}
+diff --git a/src/nativeink/NativeInkOverlay.h b/src/nativeink/NativeInkOverlay.h
+new file mode 100644
+index 0000000..625de16
+--- /dev/null
++++ b/src/nativeink/NativeInkOverlay.h
+@@ -0,0 +1,126 @@
++#pragma once
++
++#include "NativeInkGeometry.h"
++#include "NativeInkInput.h"
++#include "NativeInkIpcServer.h"
++
++#include <QQuickPaintedItem>
++#include <QString>
++
++#include <atomic>
++#include <cstdint>
++#include <deque>
++#include <mutex>
++#include <vector>
++
++class QPainter;
++
++class NativeInkOverlay : public QQuickPaintedItem {
++    Q_OBJECT
++    Q_PROPERTY(bool sessionEnabled READ sessionEnabled WRITE setSessionEnabled NOTIFY sessionEnabledChanged)
++    Q_PROPERTY(bool sessionActive READ sessionActive NOTIFY sessionActiveChanged)
++    Q_PROPERTY(bool markerInProximity READ markerInProximity NOTIFY markerInProximityChanged)
++    Q_PROPERTY(bool rearEraserSelected READ rearEraserSelected NOTIFY rearEraserSelectedChanged)
++    Q_PROPERTY(int framebufferID READ framebufferID WRITE setFramebufferID NOTIFY framebufferIDChanged)
++    Q_PROPERTY(QString diagnosticsSummary READ diagnosticsSummary NOTIFY diagnosticsChanged)
++
++public:
++    explicit NativeInkOverlay(QQuickItem *parent = nullptr);
++    ~NativeInkOverlay() override;
++
++    bool sessionEnabled() const { return sessionEnabled_; }
++    bool sessionActive() const { return sessionActive_; }
++    void setSessionEnabled(bool enabled);
++    bool markerInProximity() const { return markerInProximity_; }
++    bool rearEraserSelected() const { return rearEraserSelected_; }
++    int framebufferID() const { return framebufferID_; }
++    void setFramebufferID(int framebufferID);
++    QString diagnosticsSummary() const;
++
++    Q_INVOKABLE void clearPreview();
++
++    void paint(QPainter *painter) override;
++
++signals:
++    void sessionEnabledChanged();
++    void sessionActiveChanged();
++    void markerInProximityChanged();
++    void rearEraserSelectedChanged();
++    void framebufferIDChanged();
++    void diagnosticsChanged();
++
++private:
++    struct Stroke {
++        std::uint64_t id = 0;
++        std::vector<nativeink::Point> points;
++    };
++
++    struct QueuedEvent {
++        enum class Kind { Pen, Touch } kind = Kind::Pen;
++        nativeink::PenSample pen;
++        nativeink::TouchFrame touch;
++    };
++
++    void startSession();
++    void stopSession();
++    void enqueuePen(const nativeink::PenSample &sample);
++    void enqueueTouch(const nativeink::TouchFrame &frame);
++    void enqueue(QueuedEvent event);
++    void drainEvents();
++    nativeink::RectF processPen(const nativeink::PenSample &sample);
++    void processTouch(const nativeink::TouchFrame &frame);
++    nativeink::RectF beginContact(const nativeink::PenSample &sample);
++    nativeink::RectF appendContactPoint(const nativeink::PenSample &sample);
++    nativeink::RectF finishContact(const nativeink::PenSample &sample);
++    nativeink::RectF eraseAt(const nativeink::Point &point);
++    nativeink::RectF eraserCursorBounds() const;
++    void sendHello(std::uint64_t timestampNs);
++    void flushPointBatch(bool finalChunk);
++    nativeink::Metrics metricsSnapshot() const;
++    static std::uint64_t monotonicNs();
++    static std::uint32_t toolFlags(nativeink::Tool tool, std::uint32_t flags = 0);
++    static nativeink::PointF pointF(const nativeink::Point &point);
++    static std::vector<nativeink::PointF> pointVector(const Stroke &stroke);
++
++    bool sessionEnabled_ = false;
++    bool sessionActive_ = false;
++    bool markerInProximity_ = false;
++    bool rearEraserSelected_ = false;
++    bool contactDown_ = false;
++    int framebufferID_ = -1;
++    QString startupError_;
++    nativeink::Tool activeTool_ = nativeink::Tool::None;
++    std::uint64_t activeStrokeID_ = 0;
++    std::uint64_t nextStrokeID_ = 0;
++    std::uint64_t messageSequence_ = 0;
++
++    Stroke activeStroke_;
++    std::vector<Stroke> completedStrokes_;
++    std::vector<nativeink::Point> pendingPoints_;
++    nativeink::PointF eraserCursor_;
++    bool eraserCursorVisible_ = false;
++    static constexpr float kPenWidth = 3.0F;
++    static constexpr float kEraserRadius = 24.0F;
++
++    nativeink::NativeInkInput input_;
++    nativeink::NativeInkIpcServer ipc_;
++    std::mutex queueMutex_;
++    std::deque<QueuedEvent> eventQueue_;
++    std::atomic<bool> drainScheduled_{false};
++    static constexpr std::size_t kMaxQueuedEvents = 1024U;
++
++    std::atomic<std::uint64_t> rawSamplesReceived_{0};
++    std::atomic<std::uint64_t> samplesRendered_{0};
++    std::atomic<std::uint64_t> samplesHandedToClient_{0};
++    std::atomic<std::uint64_t> samplesDropped_{0};
++    std::atomic<std::uint64_t> displayUpdatesSubmitted_{0};
++    std::atomic<std::uint64_t> displayUpdatesCoalesced_{0};
++    std::atomic<std::uint64_t> paintCalls_{0};
++    std::atomic<std::uint64_t> paintTimeUs_{0};
++    std::atomic<std::uint64_t> rawToReceiptUs_{0};
++    std::atomic<std::uint64_t> rawToReceiptCount_{0};
++    std::atomic<std::uint64_t> receiptToSubmitUs_{0};
++    std::atomic<std::uint64_t> receiptToSubmitCount_{0};
++    std::atomic<std::uint64_t> eventToSubmitUs_{0};
++    std::atomic<std::uint64_t> eventToSubmitCount_{0};
++};
+diff --git a/src/nativeink/NativeInkProtocol.h b/src/nativeink/NativeInkProtocol.h
+new file mode 100644
+index 0000000..5e6a452
+--- /dev/null
++++ b/src/nativeink/NativeInkProtocol.h
+@@ -0,0 +1,151 @@
++#pragma once
++
++#include <cstddef>
++#include <cstdint>
++#include <type_traits>
++
++namespace nativeink {
++
++constexpr std::uint32_t kMagic = 0x314b4e49U; // "INK1" on little-endian targets.
++constexpr std::uint16_t kProtocolMajor = 1;
++constexpr std::uint16_t kProtocolMinor = 0;
++constexpr std::uint32_t kMaxPayloadBytes = 32U * 1024U;
++constexpr std::uint32_t kMaxPointsPerPacket = 128U;
++constexpr std::uint32_t kMaxPointsPerStroke = 10000U;
++constexpr std::uint32_t kMaxTouchSlots = 10U;
++
++enum class MessageType : std::uint16_t {
++    Hello = 1,
++    StrokeBegin = 2,
++    StrokePoints = 3,
++    StrokeEnd = 4,
++    EraseBegin = 5,
++    ErasePoints = 6,
++    EraseEnd = 7,
++    Metrics = 8,
++    Goodbye = 9,
++};
++
++enum class Tool : std::uint16_t {
++    None = 0,
++    Pen = 1,
++    RearEraser = 2,
++};
++
++enum Capability : std::uint32_t {
++    CapabilityPen = 1U << 0U,
++    CapabilityRearEraser = 1U << 1U,
++    CapabilityPressure = 1U << 2U,
++    CapabilityDistance = 1U << 3U,
++    CapabilityTilt = 1U << 4U,
++    CapabilityTouchMajor = 1U << 5U,
++    CapabilityTouchPressure = 1U << 6U,
++    CapabilityTouchToolType = 1U << 7U,
++};
++
++enum HeaderFlag : std::uint32_t {
++    FlagContact = 1U << 0U,
++    FlagProximity = 1U << 1U,
++    FlagFinalChunk = 1U << 2U,
++    FlagClockMonotonic = 1U << 3U,
++};
++
++#pragma pack(push, 1)
++struct Header {
++    std::uint32_t magic = kMagic;
++    std::uint16_t protocolMajor = kProtocolMajor;
++    std::uint16_t protocolMinor = kProtocolMinor;
++    std::uint16_t messageType = 0;
++    std::uint16_t headerBytes = sizeof(Header);
++    std::uint32_t payloadBytes = 0;
++    std::uint64_t sequence = 0;
++    std::uint64_t timestampNs = 0;
++    std::uint64_t strokeId = 0;
++    std::uint32_t flags = 0;
++    std::uint32_t pointCount = 0;
++};
++
++struct Point {
++    float x = 0.0F;
++    float y = 0.0F;
++    std::uint64_t timestampNs = 0;
++    std::uint16_t pressure = 0;
++    std::int16_t tiltX = 0;
++    std::int16_t tiltY = 0;
++    std::uint16_t tool = static_cast<std::uint16_t>(Tool::None);
++};
++
++struct Hello {
++    std::uint32_t screenWidth = 0;
++    std::uint32_t screenHeight = 0;
++    std::uint32_t capabilities = 0;
++    std::uint32_t maxPointsPerPacket = kMaxPointsPerPacket;
++    std::uint32_t maxPointsPerStroke = kMaxPointsPerStroke;
++    std::uint32_t maxTouchSlots = kMaxTouchSlots;
++    std::uint32_t reserved0 = 0;
++    std::uint32_t reserved1 = 0;
++};
++
++struct Metrics {
++    std::uint64_t rawSamplesReceived = 0;
++    std::uint64_t samplesRendered = 0;
++    std::uint64_t samplesHandedToClient = 0;
++    std::uint64_t samplesDropped = 0;
++    std::uint64_t displayUpdatesSubmitted = 0;
++    std::uint64_t displayUpdatesCoalesced = 0;
++    std::uint64_t paintCalls = 0;
++    std::uint64_t paintTimeUs = 0;
++    std::uint64_t rawToReceiptUs = 0;
++    std::uint64_t rawToReceiptCount = 0;
++    std::uint64_t receiptToSubmitUs = 0;
++    std::uint64_t receiptToSubmitCount = 0;
++    std::uint64_t eventToSubmitUs = 0;
++    std::uint64_t eventToSubmitCount = 0;
++};
++#pragma pack(pop)
++
++static_assert(std::is_trivially_copyable_v<Header>);
++static_assert(std::is_trivially_copyable_v<Point>);
++static_assert(sizeof(Header) == 48U);
++static_assert(sizeof(Point) == 24U);
++static_assert(sizeof(Hello) == 32U);
++static_assert(sizeof(Metrics) == 112U);
++
++inline bool isKnownType(std::uint16_t rawType)
++{
++    switch (static_cast<MessageType>(rawType)) {
++    case MessageType::Hello:
++    case MessageType::StrokeBegin:
++    case MessageType::StrokePoints:
++    case MessageType::StrokeEnd:
++    case MessageType::EraseBegin:
++    case MessageType::ErasePoints:
++    case MessageType::EraseEnd:
++    case MessageType::Metrics:
++    case MessageType::Goodbye:
++        return true;
++    }
++    return false;
++}
++
++inline bool validateHeader(const Header &header)
++{
++    if (header.magic != kMagic || header.protocolMajor != kProtocolMajor)
++        return false;
++    if (header.headerBytes != sizeof(Header) || !isKnownType(header.messageType))
++        return false;
++    if (header.payloadBytes > kMaxPayloadBytes || header.pointCount > kMaxPointsPerPacket)
++        return false;
++    if ((header.messageType == static_cast<std::uint16_t>(MessageType::StrokePoints)
++            || header.messageType == static_cast<std::uint16_t>(MessageType::ErasePoints))
++        && header.payloadBytes != header.pointCount * sizeof(Point))
++        return false;
++    return true;
++}
++
++inline std::size_t packetBytes(const Header &header)
++{
++    return static_cast<std::size_t>(header.headerBytes) + header.payloadBytes;
++}
++
++} // namespace nativeink
+diff --git a/src/qtfb/FBController.cpp b/src/qtfb/FBController.cpp
+index f022c33..c3698e5 100644
+--- a/src/qtfb/FBController.cpp
++++ b/src/qtfb/FBController.cpp
+@@ -1,6 +1,10 @@
+ #include "FBController.h"
+ #include "fbmanagement.h"
+ #include "log.h"
++#include "ScaledRect.h"
++
++#include <algorithm>
++#include <QtGlobal>
+ 
+ void FBController::setFramebufferID(int fbId){
+     if(_framebufferID != fbId){
+@@ -72,16 +76,25 @@ void FBController::associateSHM(QImage *image) {
+ 
+ void FBController::markedUpdate(const QRect &rect) {
+     isMidPaint = true;
++    if(!rect.isValid()) {
++        update();
++        emit contentReplaced();
++        isMidPaint = false;
++        return;
++    }
+     if(_allowScaling && image) {
+-        update(QRect(
+-           (rect.x() / image->width()) * this->width(),
+-           (rect.y() / image->height()) * this->height(),
+-           (rect.width() / image->width()) * this->width(),
+-           (rect.height() / image->height()) * this->height()
+-        ));
++        const auto scaled = qtfb::scale::fromFramebuffer(
++            {rect.x(), rect.y(), rect.width(), rect.height()},
++            image->width(), image->height(), qRound(width()), qRound(height()));
++        update(QRect(scaled.x, scaled.y, scaled.width, scaled.height));
+     } else {
+         update(rect);
+     }
++    if(image && static_cast<qint64>(rect.width()) * rect.height()
++            >= static_cast<qint64>(image->width()) * image->height() / 2) {
++        emit contentReplaced();
++    }
++    isMidPaint = false;
+ }
+ 
+ void FBController::setAllowScaling(bool a){
+@@ -106,6 +119,10 @@ QPoint FBController::convertPointToQTFBPixels(const QPointF &input) {
+ 
+ 
+ void FBController::mousePressEvent(QMouseEvent *me) {
++    if(suppressPenInput) {
++        me->accept();
++        return;
++    }
+     if(_framebufferID != -1 && !me->points().isEmpty()) {
+         const QEventPoint &point = me->points()[0];
+         QPoint conv = convertPointToQTFBPixels(point.position());
+@@ -122,6 +139,10 @@ void FBController::mousePressEvent(QMouseEvent *me) {
+ }
+ 
+ void FBController::mouseMoveEvent(QMouseEvent *me) {
++    if(suppressPenInput) {
++        me->accept();
++        return;
++    }
+     if(_framebufferID != -1 && !me->points().isEmpty()) {
+         const QEventPoint &point = me->points()[0];
+         QPoint conv = convertPointToQTFBPixels(point.position());
+@@ -167,6 +188,10 @@ void FBController::specialKeyUp(int key) {
+ }
+ 
+ void FBController::mouseReleaseEvent(QMouseEvent *me) {
++    if(suppressPenInput) {
++        me->accept();
++        return;
++    }
+     if(_framebufferID != -1) {
+         QPoint conv = convertPointToQTFBPixels(me->position());
+         qtfb::UserInputContents packet {
+@@ -182,6 +207,10 @@ void FBController::mouseReleaseEvent(QMouseEvent *me) {
+ }
+ 
+ void FBController::touchEvent(QTouchEvent *me) {
++    if(suppressTouchInput) {
++        me->accept();
++        return;
++    }
+     if(_framebufferID != -1) {
+         int lenPoints = me->points().length();
+         if(lenPoints == 5 && !refreshedScreenAlready) {
+diff --git a/src/qtfb/FBController.h b/src/qtfb/FBController.h
+index aa46b73..bc83f6d 100644
+--- a/src/qtfb/FBController.h
++++ b/src/qtfb/FBController.h
+@@ -21,6 +21,8 @@ class FBController : public QQuickPaintedItem
+     Q_PROPERTY(int framebufferID READ framebufferID WRITE setFramebufferID)
+     Q_PROPERTY(bool allowScaling READ allowScaling WRITE setAllowScaling)
+     Q_PROPERTY(int refreshMode READ refreshMode NOTIFY refreshModeChanged)
++    Q_PROPERTY(bool suppressPenInput MEMBER suppressPenInput)
++    Q_PROPERTY(bool suppressTouchInput MEMBER suppressTouchInput)
+     Q_OBJECT
+ public:
+     explicit FBController(QQuickItem *parent = nullptr) : QQuickPaintedItem(parent) { setAcceptTouchEvents(true); setAcceptedMouseButtons((Qt::MouseButtons) 0xFFFFFFFF); setFocusPolicy(Qt::StrongFocus); }
+@@ -63,12 +65,15 @@ signals:
+     void dragDown();
+     void requestFullRefresh();
+     void refreshModeChanged();
++    void contentReplaced();
+ 
+ private:
+     int _framebufferID = -1;
+     int _refreshMode = DEFAULT_WAVEFORM_MODE;
+     bool _active = false;
+     bool _allowScaling = false;
++    bool suppressPenInput = false;
++    bool suppressTouchInput = false;
+ 
+     bool checkingGestureDragDown = false;
+     bool refreshedScreenAlready = false;
+diff --git a/src/qtfb/ScaledRect.h b/src/qtfb/ScaledRect.h
+new file mode 100644
+index 0000000..92881a5
+--- /dev/null
++++ b/src/qtfb/ScaledRect.h
+@@ -0,0 +1,33 @@
++#pragma once
++
++#include <algorithm>
++#include <cstdint>
++
++namespace qtfb::scale {
++
++struct Rect {
++    int x = 0;
++    int y = 0;
++    int width = 0;
++    int height = 0;
++
++    bool valid() const { return width > 0 && height > 0; }
++};
++
++inline Rect fromFramebuffer(const Rect &input, int framebufferWidth, int framebufferHeight,
++                            int viewWidth, int viewHeight)
++{
++    if (!input.valid() || framebufferWidth <= 0 || framebufferHeight <= 0
++        || viewWidth <= 0 || viewHeight <= 0)
++        return {};
++    return {
++        static_cast<int>(static_cast<std::int64_t>(input.x) * viewWidth / framebufferWidth),
++        static_cast<int>(static_cast<std::int64_t>(input.y) * viewHeight / framebufferHeight),
++        std::max(1, static_cast<int>((static_cast<std::int64_t>(input.width) * viewWidth
++                                     + framebufferWidth - 1) / framebufferWidth)),
++        std::max(1, static_cast<int>((static_cast<std::int64_t>(input.height) * viewHeight
++                                     + framebufferHeight - 1) / framebufferHeight)),
++    };
++}
++
++} // namespace qtfb::scale
+diff --git a/tests/nativeink_geometry_test.cpp b/tests/nativeink_geometry_test.cpp
+new file mode 100644
+index 0000000..3abb336
+--- /dev/null
++++ b/tests/nativeink_geometry_test.cpp
+@@ -0,0 +1,38 @@
++#include "../src/nativeink/NativeInkGeometry.h"
++
++#include <cassert>
++#include <cmath>
++#include <iostream>
++#include <vector>
++
++namespace {
++
++bool near(float left, float right)
++{
++    return std::fabs(left - right) < 0.001F;
++}
++
++} // namespace
++
++int main()
++{
++    using namespace nativeink;
++
++    const RectF bounds = segmentBounds({10.0F, 20.0F}, {30.0F, 40.0F}, 2.0F, 1.0F);
++    assert(near(bounds.x, 7.0F));
++    assert(near(bounds.y, 17.0F));
++    assert(near(bounds.width, 26.0F));
++    assert(near(bounds.height, 26.0F));
++
++    const RectF combined = unite({0.0F, 0.0F, 10.0F, 10.0F}, {8.0F, 8.0F, 10.0F, 10.0F});
++    assert(near(combined.width, 18.0F));
++    assert(near(combined.height, 18.0F));
++
++    const std::vector<PointF> stroke{{0.0F, 0.0F}, {100.0F, 0.0F}, {100.0F, 100.0F}};
++    assert(strokeHit(stroke, {50.0F, 4.0F}, 5.0F));
++    assert(strokeHit(stroke, {96.0F, 50.0F}, 5.0F));
++    assert(!strokeHit(stroke, {50.0F, 20.0F}, 5.0F));
++
++    std::cout << "nativeink_geometry_test: PASS\n";
++    return 0;
++}
+diff --git a/tests/nativeink_ipc_test.cpp b/tests/nativeink_ipc_test.cpp
+new file mode 100644
+index 0000000..4716eaf
+--- /dev/null
++++ b/tests/nativeink_ipc_test.cpp
+@@ -0,0 +1,50 @@
++#include "../src/nativeink/NativeInkIpcServer.h"
++
++#include <cassert>
++#include <cstring>
++#include <iostream>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++int main()
++{
++    using namespace nativeink;
++
++    NativeInkIpcServer server;
++    if (!server.start(654321)) {
++        std::cerr << "nativeink_ipc_test: SKIP " << server.lastError() << "\n";
++        return 77;
++    }
++
++    const int client = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
++    assert(client >= 0);
++    struct sockaddr_un address {};
++    address.sun_family = AF_UNIX;
++    assert(server.socketPath().size() < sizeof(address.sun_path));
++    std::memcpy(address.sun_path, server.socketPath().c_str(), server.socketPath().size() + 1U);
++    assert(::connect(client, reinterpret_cast<const struct sockaddr *>(&address), sizeof(address)) == 0);
++
++    Hello hello;
++    hello.screenWidth = 1620;
++    hello.screenHeight = 2160;
++    assert(server.send(MessageType::Hello, 1, 1000, 0, 0, &hello, sizeof(hello)));
++
++    unsigned char packet[sizeof(Header) + sizeof(Hello)] {};
++    const ssize_t received = ::recv(client, packet, sizeof(packet), 0);
++    assert(received == static_cast<ssize_t>(sizeof(packet)));
++    const auto *header = reinterpret_cast<const Header *>(packet);
++    assert(validateHeader(*header));
++    assert(header->messageType == static_cast<std::uint16_t>(MessageType::Hello));
++    const auto *payload = reinterpret_cast<const Hello *>(packet + sizeof(Header));
++    assert(payload->screenWidth == 1620);
++    assert(payload->screenHeight == 2160);
++
++    ::close(client);
++    const std::string socketPath = server.socketPath();
++    server.stop();
++    assert(::access(socketPath.c_str(), F_OK) != 0);
++
++    std::cout << "nativeink_ipc_test: PASS\n";
++    return 0;
++}
+diff --git a/tests/nativeink_protocol_test.cpp b/tests/nativeink_protocol_test.cpp
+new file mode 100644
+index 0000000..ebf39b0
+--- /dev/null
++++ b/tests/nativeink_protocol_test.cpp
+@@ -0,0 +1,45 @@
++#include "../src/nativeink/NativeInkProtocol.h"
++
++#include <cassert>
++#include <cstdint>
++#include <iostream>
++
++int main()
++{
++    using namespace nativeink;
++
++    Header hello;
++    hello.messageType = static_cast<std::uint16_t>(MessageType::Hello);
++    hello.payloadBytes = sizeof(Hello);
++    assert(validateHeader(hello));
++    assert(packetBytes(hello) == sizeof(Header) + sizeof(Hello));
++
++    Header points;
++    points.messageType = static_cast<std::uint16_t>(MessageType::StrokePoints);
++    points.pointCount = 12;
++    points.payloadBytes = points.pointCount * sizeof(Point);
++    assert(validateHeader(points));
++
++    points.payloadBytes--;
++    assert(!validateHeader(points));
++    points.payloadBytes++;
++    points.pointCount = kMaxPointsPerPacket + 1U;
++    assert(!validateHeader(points));
++
++    Header unknown;
++    unknown.messageType = 999;
++    assert(!validateHeader(unknown));
++
++    Header wrongVersion;
++    wrongVersion.messageType = static_cast<std::uint16_t>(MessageType::Goodbye);
++    wrongVersion.protocolMajor++;
++    assert(!validateHeader(wrongVersion));
++
++    Header oversized;
++    oversized.messageType = static_cast<std::uint16_t>(MessageType::Metrics);
++    oversized.payloadBytes = kMaxPayloadBytes + 1U;
++    assert(!validateHeader(oversized));
++
++    std::cout << "nativeink_protocol_test: PASS\n";
++    return 0;
++}
+diff --git a/tests/qtfb_scaled_rect_test.cpp b/tests/qtfb_scaled_rect_test.cpp
+new file mode 100644
+index 0000000..aab7d72
+--- /dev/null
++++ b/tests/qtfb_scaled_rect_test.cpp
+@@ -0,0 +1,31 @@
++#include "../src/qtfb/ScaledRect.h"
++
++#include <cassert>
++#include <iostream>
++
++int main()
++{
++    using qtfb::scale::Rect;
++    using qtfb::scale::fromFramebuffer;
++
++    const Rect onePixel = fromFramebuffer({100, 200, 1, 1}, 1620, 2160, 810, 1080);
++    assert(onePixel.valid());
++    assert(onePixel.x == 50);
++    assert(onePixel.y == 100);
++    assert(onePixel.width == 1);
++    assert(onePixel.height == 1);
++
++    const Rect dirty = fromFramebuffer({810, 1080, 100, 200}, 1620, 2160, 1620, 2160);
++    assert(dirty.x == 810 && dirty.y == 1080);
++    assert(dirty.width == 100 && dirty.height == 200);
++
++    const Rect scaledUp = fromFramebuffer({10, 20, 30, 40}, 100, 200, 200, 400);
++    assert(scaledUp.x == 20 && scaledUp.y == 40);
++    assert(scaledUp.width == 60 && scaledUp.height == 80);
++
++    assert(!fromFramebuffer({}, 1620, 2160, 1620, 2160).valid());
++    assert(!fromFramebuffer({1, 1, 1, 1}, 0, 2160, 1620, 2160).valid());
++
++    std::cout << "qtfb_scaled_rect_test: PASS\n";
++    return 0;
++}
+diff --git a/tests/run-host-tests.sh b/tests/run-host-tests.sh
+new file mode 100755
+index 0000000..aa6f08c
+--- /dev/null
++++ b/tests/run-host-tests.sh
+@@ -0,0 +1,30 @@
++#!/bin/sh
++set -eu
++
++script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
++repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
++build_dir=${TMPDIR:-/tmp}/rm-appload-nativeink-host-tests
++
++mkdir -p "$build_dir"
++
++compile_and_run() {
++    source_file=$1
++    output_name=$2
++    c++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 \
++        "$repo_dir/tests/$source_file" -o "$build_dir/$output_name"
++    "$build_dir/$output_name"
++}
++
++compile_and_run nativeink_protocol_test.cpp nativeink_protocol_test
++compile_and_run nativeink_geometry_test.cpp nativeink_geometry_test
++compile_and_run qtfb_scaled_rect_test.cpp qtfb_scaled_rect_test
++
++c++ -std=c++17 -Wall -Wextra -Werror -pedantic -O2 \
++    "$repo_dir/tests/nativeink_ipc_test.cpp" \
++    "$repo_dir/src/nativeink/NativeInkIpcServer.cpp" \
++    -I"$repo_dir/src/nativeink" -o "$build_dir/nativeink_ipc_test"
++ipc_status=0
++"$build_dir/nativeink_ipc_test" || ipc_status=$?
++if [ "$ipc_status" -ne 0 ] && [ "$ipc_status" -ne 77 ]; then exit "$ipc_status"; fi
++
++echo "rm-appload native ink host tests: PASS"
+diff --git a/tools/build-phase6n1-poc.sh b/tools/build-phase6n1-poc.sh
+new file mode 100755
+index 0000000..66f3a13
+--- /dev/null
++++ b/tools/build-phase6n1-poc.sh
+@@ -0,0 +1,37 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++if [[ "$(uname -s)" != Linux ]]; then
++    echo "Phase 6N-1 AppLoad build requires Linux" >&2
++    exit 2
++fi
++if [[ -z "${XOVI_REPO:-}" || ! -r "$XOVI_REPO/util/xovigen.py" ]]; then
++    echo "XOVI_REPO must point to a readable Xovi source checkout" >&2
++    exit 3
++fi
++for command_name in qmake6 rcc make readelf sha256sum; do
++    command -v "$command_name" >/dev/null || {
++        echo "missing required tool: $command_name" >&2
++        exit 4
++    }
++done
++
++repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
++artifact_dir="$repo_dir/artifacts/phase6n1"
++mkdir -p "$artifact_dir"
++
++cd "$repo_dir"
++./tests/run-host-tests.sh
++cd xovi
++./make.sh
++
++short_sha=$(git -C "$repo_dir" rev-parse --short=12 HEAD)
++artifact="$artifact_dir/appload-phase6n1-poc-${short_sha}.so"
++cp appload.so "$artifact"
++sha256sum "$artifact" >"$artifact.sha256"
++readelf -h "$artifact" | grep -E 'Class:.*ELF64'
++readelf -h "$artifact" | grep -E 'Machine:.*AArch64'
++readelf -d "$artifact" >"$artifact.dynamic.txt"
++
++printf 'artifact=%s\n' "$artifact"
++printf 'checksum=%s\n' "$(cut -d' ' -f1 "$artifact.sha256")"
+diff --git a/xovi/template/appload.pro b/xovi/template/appload.pro
+index 2f9c00b..bb4ab26 100644
+--- a/xovi/template/appload.pro
++++ b/xovi/template/appload.pro
+@@ -1,10 +1,12 @@
+-QT     += core gui qml quickcontrols2
++QT     += core gui qml quick quickcontrols2
++CONFIG += c++17
+ 
+ TARGET = appload
+ TEMPLATE = lib
+ CONFIG += shared plugin no_plugin_name_prefix
+ 
+-SOURCES += src/main.cpp xovi.cpp src/management.cpp src/AppLoad.cpp src/AppLoadCoordinator.cpp src/library.cpp src/libraryexternals.cpp src/qtfb/fbmanagement.cpp src/qtfb/FBController.cpp src/keyboard/layout.cpp
++SOURCES += src/main.cpp xovi.cpp src/management.cpp src/AppLoad.cpp src/AppLoadCoordinator.cpp src/library.cpp src/libraryexternals.cpp src/qtfb/fbmanagement.cpp src/qtfb/FBController.cpp src/keyboard/layout.cpp src/nativeink/NativeInkInput.cpp src/nativeink/NativeInkIpcServer.cpp src/nativeink/NativeInkOverlay.cpp
+ HEADERS += src/AppLoad.h src/AppLoadCoordinator.h src/library.h src/AppLibrary.h \
+-            src/qtfb/FBController.h src/qtfb/fbmanagement.h src/keyboard/layout.h src/Launcher.h
+-
++            src/qtfb/FBController.h src/qtfb/fbmanagement.h src/qtfb/ScaledRect.h src/keyboard/layout.h src/Launcher.h \
++            src/nativeink/NativeInkProtocol.h src/nativeink/NativeInkGeometry.h \
++            src/nativeink/NativeInkInput.h src/nativeink/NativeInkIpcServer.h src/nativeink/NativeInkOverlay.h
+diff --git a/xovi/template/src/main.cpp b/xovi/template/src/main.cpp
+index a744b8c..091f756 100644
+--- a/xovi/template/src/main.cpp
++++ b/xovi/template/src/main.cpp
+@@ -3,6 +3,7 @@
+ 
+ #include "qtfb/FBController.h"
+ #include "qtfb/fbmanagement.h"
++#include "nativeink/NativeInkOverlay.h"
+ 
+ #include "AppLoadCoordinator.h"
+ #include "Launcher.h"
+@@ -26,6 +27,7 @@ extern "C" {
+         qmlRegisterType<AppLoadLibrary>("net.asivery.AppLoad", 1, 0, "AppLoadLibrary");
+         qmlRegisterType<AppLoadApplication>("net.asivery.AppLoad", 1, 0, "AppLoadApplication");
+         qmlRegisterType<FBController>("net.asivery.Framebuffer", 1, 0, "FBController");
++        qmlRegisterType<NativeInkOverlay>("net.asivery.NativeInk", 1, 0, "NativeInkOverlay");
+         qmlRegisterSingletonType<AppLoadLauncher>("net.asivery.AppLoad", 1, 0, "AppLoadLauncher", &AppLoadLauncher::qmlSingleton);
+         qt_resource_rebuilder$qmldiff_add_external_diff(r$apploadDiff, "AppLoad hooks in main UI");
+ 

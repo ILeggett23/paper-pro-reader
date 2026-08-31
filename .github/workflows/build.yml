@@ -222,6 +222,9 @@ jobs:
       - name: Test
         run: ./base/utils/fake_tty.py make --assume-old=base testfront
 
+      - name: Test base
+        run: ./base/utils/fake_tty.py make --assume-old=base testbase
+
       # Generate / upload artifact. {{{
 
       - name: Generate artifact

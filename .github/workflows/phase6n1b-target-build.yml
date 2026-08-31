@@ -1,0 +1,483 @@
+name: phase-6n1b-target-build
+
+on:
+  push:
+    branches: [spike/phase-6n1-native-ink]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-6n1b-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APPLOAD_BASE: 5bb34a362f09f753f18bd6261558f8e2737aacdb
+  APPLOAD_POC: 891bd8e528ac88e894d9e670a955cad44c8ce1e5
+  APPLOAD_TREE: a5ced6adde79883ae24add4bbf3e437dd4c43dad
+  APPLOAD_PATCH_SHA256: fb14cd24e5c32a61056a1f498f1bc17d67e5eef3b955b2b8ff8e66675eba0a5d
+  XOVI_COMMIT: 0c8d5269b55c851901d4e4a754dc2d7deab40b17
+  READER_POC: 47ae810160a00c97bb9b13f2af5a67ab2d7dd2d1
+  READER_ROLLBACK: 8ae4353409e8c5569c9d1fba3176fb0318517c6e
+  APPLOAD_IMAGE: eeems/remarkable-toolchain@sha256:315826e2548ba65bc69bcb486278dbacd8fccc14422180eae40e23d806a36124
+  KOREADER_IMAGE: koreader/koremarkable@sha256:587457c7c63381905439ceef550dd4cd8148f427da4c21a9ede345d7099ab7ee
+
+jobs:
+  source-qualification:
+    name: source static and secret qualification
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install static-analysis tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y luarocks shellcheck
+          sudo luarocks install luacheck
+
+      - name: Record source environment
+        run: |
+          mkdir -p phase6n1b-source-output
+          {
+            printf 'workflow_commit=%s\n' "$GITHUB_SHA"
+            printf 'reader_poc=%s\n' "$READER_POC"
+            printf 'app_poc=%s\n' "$APPLOAD_POC"
+            uname -a
+            cat /etc/os-release
+            bash --version | head -n 1
+            getopt --version | head -n 1
+            python3 --version
+            shellcheck --version | head -n 2
+            luacheck --version
+          } | tee phase6n1b-source-output/environment.txt
+
+      - name: Static checks
+        run: |
+          set -o pipefail
+          ./kodev check 2>&1 | tee phase6n1b-source-output/kodev-check.txt
+          PYTHONPYCACHEPREFIX=/tmp/phase6n1b-pycache \
+            python3 -m py_compile tools/phase6n1/compare_metrics.py
+          python3 tools/phase6n1/compare_metrics.py \
+            tools/phase6n1/measurement-fixture.csv \
+            --output phase6n1b-source-output/measurement-fixture.md
+          git diff --check
+
+      - name: Secret checks
+        run: |
+          set -o pipefail
+          bash tools/paperpro-secret-scan.sh 2>&1 \
+            | tee phase6n1b-source-output/secret-scan.txt
+
+      - name: Upload source qualification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase6n1b-source-qualification-${{ github.sha }}
+          archive: false
+          path: phase6n1b-source-output
+
+  appload-target:
+    name: AppLoad v0.5.3 native-ink AArch64
+    runs-on: ubuntu-22.04
+    container:
+      image: eeems/remarkable-toolchain@sha256:315826e2548ba65bc69bcb486278dbacd8fccc14422180eae40e23d806a36124
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install host build tools
+        run: |
+          apt-get update
+          apt-get install -y build-essential cmake curl file git ninja-build \
+            python3 qt6-base-dev unzip
+          ln -sf /usr/lib/qt6/libexec/rcc /usr/local/bin/rcc
+
+      - name: Reconstruct accepted AppLoad source
+        run: |
+          set -euxo pipefail
+          patch_file="$GITHUB_WORKSPACE/tools/phase6n1/appload-native-ink.patch"
+          printf '%s  %s\n' "$APPLOAD_PATCH_SHA256" "$patch_file" | sha256sum -c -
+          git clone https://github.com/asivery/rm-appload.git "$RUNNER_TEMP/rm-appload"
+          git -C "$RUNNER_TEMP/rm-appload" checkout --detach "$APPLOAD_BASE"
+          git -C "$RUNNER_TEMP/rm-appload" apply --check "$patch_file"
+          git -C "$RUNNER_TEMP/rm-appload" apply "$patch_file"
+          git -C "$RUNNER_TEMP/rm-appload" add -A
+          actual_tree=$(git -C "$RUNNER_TEMP/rm-appload" write-tree)
+          test "$actual_tree" = "$APPLOAD_TREE"
+          git clone https://github.com/asivery/xovi.git "$RUNNER_TEMP/xovi"
+          git -C "$RUNNER_TEMP/xovi" checkout --detach "$XOVI_COMMIT"
+          test "$(git -C "$RUNNER_TEMP/xovi" rev-parse HEAD)" = "$XOVI_COMMIT"
+
+      - name: Linux host tests and sanitizer checks
+        run: |
+          set -euxo pipefail
+          mkdir -p phase6n1b-appload-output
+          cd "$RUNNER_TEMP/rm-appload"
+          ./tests/run-host-tests.sh 2>&1 \
+            | tee "$GITHUB_WORKSPACE/phase6n1b-appload-output/host-tests.txt"
+          build_dir="$RUNNER_TEMP/app-sanitizers"
+          mkdir -p "$build_dir"
+          for test_name in nativeink_protocol_test nativeink_geometry_test qtfb_scaled_rect_test; do
+            g++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+              -fsanitize=address,undefined -fno-omit-frame-pointer \
+              "tests/${test_name}.cpp" -o "$build_dir/$test_name"
+            "$build_dir/$test_name"
+          done
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/nativeink_ipc_test.cpp src/nativeink/NativeInkIpcServer.cpp \
+            -Isrc/nativeink -o "$build_dir/nativeink_ipc_test"
+          "$build_dir/nativeink_ipc_test"
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic -fanalyzer \
+            -Isrc/nativeink -c src/nativeink/NativeInkIpcServer.cpp \
+            -o "$build_dir/nativeink_ipc_analyzer.o"
+          g++ -std=c++17 -Wall -Wextra -Werror -pedantic \
+            -Isrc/nativeink -fsyntax-only src/nativeink/NativeInkInput.cpp
+          printf 'sanitizers=PASS\nstatic_analyzer=PASS\nlinux_socket=PASS\n' \
+            | tee "$GITHUB_WORKSPACE/phase6n1b-appload-output/native-checks.txt"
+
+      - name: AppLoad secret scan
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/rm-appload"
+          if grep -R -I -E \
+              'sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{20,}|OPENAI_API_KEY=|DEVICE_ACCESS_TOKEN=' \
+              --exclude-dir=.git .; then
+            echo 'secret-like material found' >&2
+            exit 1
+          fi
+          echo 'secret_scan=PASS' \
+            | tee "$GITHUB_WORKSPACE/phase6n1b-appload-output/secret-scan.txt"
+
+      - name: Record SDK and build target AppLoad
+        run: |
+          set -euxo pipefail
+          sdk_env=$(find /opt/codex -type f -name 'environment-setup-*' -print -quit)
+          test -n "$sdk_env"
+          source "$sdk_env"
+          {
+            printf 'container=%s\n' "$APPLOAD_IMAGE"
+            printf 'sdk_environment=%s\n' "$sdk_env"
+            printf 'appload_base=%s\n' "$APPLOAD_BASE"
+            printf 'appload_poc=%s\n' "$APPLOAD_POC"
+            printf 'appload_tree=%s\n' "$APPLOAD_TREE"
+            printf 'xovi_commit=%s\n' "$XOVI_COMMIT"
+            uname -a
+            cat /etc/os-release
+            "$CC" --version
+            "$CXX" --version
+            qmake6 -v
+            qmake6 -query
+            pkg-config --modversion Qt6Core
+            cmake --version | head -n 1
+            make --version | head -n 1
+            python3 --version
+            readelf --version | head -n 1
+            env | grep -E '^(CC|CXX|OECORE_|SDKTARGETSYSROOT|TARGET_PREFIX)='
+          } | tee "$GITHUB_WORKSPACE/phase6n1b-appload-output/environment.txt"
+          test "$(pkg-config --modversion Qt6Core)" = '6.8.2'
+          export XOVI_REPO="$RUNNER_TEMP/xovi"
+          cd "$RUNNER_TEMP/rm-appload/xovi"
+          ./make.sh 2>&1 \
+            | tee "$GITHUB_WORKSPACE/phase6n1b-appload-output/target-build.txt"
+
+      - name: ABI, dependency, package, and rollback qualification
+        run: |
+          set -euxo pipefail
+          out="$GITHUB_WORKSPACE/phase6n1b-appload-output"
+          source_so="$RUNNER_TEMP/rm-appload/xovi/appload.so"
+          candidate="$out/appload-phase6n1-poc-${APPLOAD_POC:0:12}.so"
+          cp "$source_so" "$candidate"
+          chmod 0755 "$candidate"
+          test -s "$candidate"
+          test -x "$candidate"
+          file "$candidate" | tee "$out/appload-file.txt"
+          file "$candidate" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64|aarch64)'
+          readelf -h "$candidate" | tee "$out/appload-elf-header.txt"
+          readelf -h "$candidate" | grep -E 'Class:.*ELF64'
+          readelf -h "$candidate" | grep -E 'Machine:.*AArch64'
+          readelf -l "$candidate" >"$out/appload-program-headers.txt"
+          if grep -q 'INTERP' "$out/appload-program-headers.txt"; then
+            echo 'shared object unexpectedly contains PT_INTERP' >&2
+            exit 1
+          fi
+          readelf -d "$candidate" | tee "$out/appload-dynamic.txt"
+          readelf -d "$candidate" | grep -q 'libQt6Core.so.6'
+          readelf -d "$candidate" | grep -q 'libQt6Gui.so.6'
+          readelf -d "$candidate" | grep -q 'libQt6Qml.so.6'
+          readelf -d "$candidate" | grep -q 'libQt6Quick.so.6'
+          readelf -Ws "$candidate" >"$out/appload-symbols.txt"
+          grep -q '_xovi_construct' "$out/appload-symbols.txt"
+          grep -q 'NativeInkOverlay' "$out/appload-symbols.txt"
+          stat -c 'mode=%a size=%s path=%n' "$candidate" \
+            | tee "$out/appload-permissions.txt"
+          sha256sum "$candidate" >"$candidate.sha256"
+
+          curl -fsSL \
+            https://github.com/asivery/rm-appload/releases/download/v0.5.3/appload-aarch64.zip \
+            -o "$RUNNER_TEMP/appload-v0.5.3.zip"
+          printf '%s  %s\n' \
+            '032e3f2c57a004aba4425894758e4b542c67590efd222e3b3d5141124c45e84d' \
+            "$RUNNER_TEMP/appload-v0.5.3.zip" | sha256sum -c -
+          rollback_dir="$RUNNER_TEMP/appstack-rollback"
+          mkdir -p "$rollback_dir"
+          unzip -q "$RUNNER_TEMP/appload-v0.5.3.zip" -d "$rollback_dir"
+          printf '%s  %s\n' \
+            '31214cbbe64c8bfe7d99096f077c3009dba8a42ef1a733801aa0ec59c134e7cc' \
+            "$rollback_dir/appload.so" | sha256sum -c -
+          printf '%s  %s\n' \
+            '6df704049aa057ff6374eaaa03a4f4a4d683b7c1ce772920d1a124be74d782c4' \
+            "$rollback_dir/shims/qtfb-shim.so" | sha256sum -c -
+          printf '%s  %s\n' \
+            'aa4fb1e6f2edf5ef0137360cac77713a24ab508800301f81c19c579fee3f5031' \
+            "$rollback_dir/shims/qtfb-shim-32bit.so" | sha256sum -c -
+          cat >"$rollback_dir/ROLLBACK.txt" <<'EOF'
+          Exact upstream AppLoad v0.5.3 AArch64 rollback bundle.
+          The installed Paper Pro AppLoad and qtfb-shim hashes were matched to these
+          files during Phase 6N-0. Do not install without the separate approved plan.
+          EOF
+          (cd "$rollback_dir" && sha256sum appload.so shims/qtfb-shim.so \
+            shims/qtfb-shim-32bit.so >SHA256SUMS)
+          tar -czf "$out/phase6n1-appstack-rollback-v0.5.3.tar.gz" \
+            -C "$rollback_dir" .
+          sha256sum "$out/phase6n1-appstack-rollback-v0.5.3.tar.gz" \
+            >"$out/phase6n1-appstack-rollback-v0.5.3.tar.gz.sha256"
+
+          python3 - <<'PY'
+          import json, os
+          out = os.path.join(os.environ['GITHUB_WORKSPACE'], 'phase6n1b-appload-output')
+          data = {
+              'schema_version': 1,
+              'kind': 'phase6n1b-appload-poc',
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'appload_base': os.environ['APPLOAD_BASE'],
+              'appload_poc': os.environ['APPLOAD_POC'],
+              'appload_tree': os.environ['APPLOAD_TREE'],
+              'xovi_commit': os.environ['XOVI_COMMIT'],
+              'container': os.environ['APPLOAD_IMAGE'],
+              'device_target': 'reMarkable Ferrari / OS 3.27.3.0',
+              'installation_authorized': False,
+          }
+          with open(os.path.join(out, 'source-manifest.json'), 'w') as handle:
+              json.dump(data, handle, indent=2, sort_keys=True)
+              handle.write('\n')
+          PY
+          (cd "$out" && sha256sum appload-phase6n1-poc-*.so \
+            phase6n1-appstack-rollback-v0.5.3.tar.gz source-manifest.json \
+            >SHA256SUMS)
+          bundle="$out/phase6n1b-appload-target-${APPLOAD_POC:0:12}.tar.gz"
+          tar -czf "$bundle" -C "$out" \
+            "$(basename "$candidate")" "$(basename "$candidate").sha256" \
+            appload-file.txt appload-elf-header.txt appload-program-headers.txt \
+            appload-dynamic.txt appload-symbols.txt appload-permissions.txt \
+            environment.txt host-tests.txt native-checks.txt secret-scan.txt \
+            target-build.txt source-manifest.json SHA256SUMS
+          sha256sum "$bundle" >"$bundle.sha256"
+
+      - name: Upload AppLoad target qualification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase6n1b-appload-target-${{ github.sha }}
+          archive: false
+          path: phase6n1b-appload-output
+
+  koreader-target:
+    name: KOReader regressions, AArch64 POC, and RC5 rollback
+    runs-on: ubuntu-22.04
+    container:
+      image: koreader/koremarkable@sha256:587457c7c63381905439ceef550dd4cd8148f427da4c21a9ede345d7099ab7ee
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          clean: false
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install backend test runtime
+        run: |
+          apt-get update
+          apt-get install -y nodejs npm
+
+      - name: Verify accepted integration boundary
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          test "$(git rev-parse "$READER_POC")" = "$READER_POC"
+          git diff --quiet "$READER_POC" HEAD -- \
+            frontend/apps/paperpro platform/remarkable spec/unit
+          mkdir -p phase6n1b-koreader-output phase6n1b-koreader-logs
+
+      - name: Record Linux host environment
+        run: |
+          {
+            printf 'container=%s\n' "$KOREADER_IMAGE"
+            printf 'workflow_commit=%s\n' "$GITHUB_SHA"
+            printf 'reader_poc=%s\n' "$READER_POC"
+            printf 'reader_rollback=%s\n' "$READER_ROLLBACK"
+            uname -a
+            cat /etc/os-release
+            bash --version | head -n 1
+            getopt --version | head -n 1
+            python3 --version
+            node --version
+            npm --version
+            gcc --version | head -n 1
+            g++ --version | head -n 1
+          } | tee phase6n1b-koreader-output/host-environment.txt
+
+      - name: Fetch pinned dependencies
+        run: |
+          git fetch --force --no-tags https://github.com/koreader/koreader.git \
+            refs/tags/v2026.07.1:refs/tags/v2026.07.1
+          make fetchthirdparty 2>&1 \
+            | tee phase6n1b-koreader-logs/fetch-thirdparty.txt
+
+      - name: Backend and secret tests
+        run: |
+          set -o pipefail
+          npm --prefix backend test 2>&1 \
+            | tee phase6n1b-koreader-logs/backend-tests.txt
+          bash tools/paperpro-secret-scan.sh 2>&1 \
+            | tee phase6n1b-koreader-logs/secret-scan.txt
+
+      - name: Focused native integration specs
+        run: |
+          set -o pipefail
+          ./kodev test front \
+            spec/unit/paperpro_nativebridge_spec.lua \
+            spec/unit/paperpro_inkservice_spec.lua \
+            spec/unit/paperproreader_spec.lua 2>&1 \
+            | tee phase6n1b-koreader-logs/focused-tests.txt
+
+      - name: Complete frontend regression suite
+        run: |
+          set -o pipefail
+          ./kodev test --no-build front 2>&1 \
+            | tee phase6n1b-koreader-logs/front-tests.txt
+
+      - name: Complete base regression suite
+        run: |
+          set -o pipefail
+          ./kodev test --no-build base 2>&1 \
+            | tee phase6n1b-koreader-logs/base-tests.txt
+
+      - name: Build and qualify remarkable-aarch64 POC
+        run: |
+          set -euxo pipefail
+          export BASH_ENV=/home/ko/.bashrc
+          source "$BASH_ENV"
+          export MAKEFLAGS='OUTPUT_DIR=build-phase6n1b INSTALL_DIR=install-phase6n1b TARGET=remarkable-aarch64 PARALLEL_JOBS=4'
+          {
+            printf 'container=%s\n' "$KOREADER_IMAGE"
+            command -v aarch64-remarkable-linux-gnu-gcc
+            command -v aarch64-remarkable-linux-gnu-g++
+            aarch64-remarkable-linux-gnu-gcc --version
+            aarch64-remarkable-linux-gnu-g++ --version
+            env | grep -E '^(CC|CXX|OECORE_|SDKTARGETSYSROOT|TARGET_PREFIX)='
+            readelf --version | head -n 1
+          } | tee phase6n1b-koreader-output/target-environment.txt
+          ./kodev release --ignore-translation remarkable-aarch64 txz 2>&1 \
+            | tee phase6n1b-koreader-logs/target-build.txt
+          source_archive=$(find . -maxdepth 1 -type f \
+            -name 'koreader-remarkable-aarch64-*.tar.xz' -print -quit)
+          test -n "$source_archive"
+          short_sha=${GITHUB_SHA:0:12}
+          candidate="$RUNNER_TEMP/paper-pro-reader-phase6n1b-poc-${short_sha}.tar.xz"
+          mv "$source_archive" "$candidate"
+          sha256sum "$candidate" >"$candidate.sha256"
+          package_dir=$(mktemp -d)
+          tar -xJf "$candidate" -C "$package_dir"
+          root="$package_dir/koreader"
+          test -x "$root/luajit"
+          test -x "$root/reader.lua"
+          test -x "$root/koreader.sh"
+          test -r "$root/external.manifest.json"
+          python3 -m json.tool "$root/external.manifest.json" >/dev/null
+          grep -q '"nativeInk"[[:space:]]*:[[:space:]]*true' "$root/external.manifest.json"
+          grep -q '"KO_NATIVE_INK"[[:space:]]*:[[:space:]]*"1"' "$root/external.manifest.json"
+          file "$root/luajit" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64|aarch64)'
+          readelf -h "$root/luajit" | grep -E 'Class:.*ELF64'
+          readelf -h "$root/luajit" | grep -E 'Machine:.*AArch64'
+          readelf -l "$root/luajit" | tee phase6n1b-koreader-output/luajit-program-headers.txt
+          grep -q 'Requesting program interpreter' phase6n1b-koreader-output/luajit-program-headers.txt
+          readelf -d "$root/luajit" >phase6n1b-koreader-output/luajit-dynamic.txt
+          find "$root" -type f -perm /111 -exec file {} \; \
+            >phase6n1b-koreader-output/executable-files.txt
+          if grep -R -E \
+              'sk-[A-Za-z0-9_-]{20,}|OPENAI_API_KEY=|DEVICE_ACCESS_TOKEN=' "$root"; then
+            echo 'secret-like material found in POC package' >&2
+            exit 1
+          fi
+          tar -tJf "$candidate" >phase6n1b-koreader-output/poc-contents.txt
+          cp "$candidate" "$candidate.sha256" phase6n1b-koreader-output/
+
+      - name: Build and qualify exact RC5-source rollback
+        run: |
+          set -euxo pipefail
+          git switch --detach "$READER_ROLLBACK"
+          test "$(git rev-parse HEAD)" = "$READER_ROLLBACK"
+          export BASH_ENV=/home/ko/.bashrc
+          source "$BASH_ENV"
+          export MAKEFLAGS='OUTPUT_DIR=build-phase6n1b-rollback INSTALL_DIR=install-phase6n1b-rollback TARGET=remarkable-aarch64 PARALLEL_JOBS=4'
+          ./kodev release --ignore-translation remarkable-aarch64 txz 2>&1 \
+            | tee phase6n1b-koreader-logs/rollback-build.txt
+          source_archive=$(find . -maxdepth 1 -type f \
+            -name 'koreader-remarkable-aarch64-*.tar.xz' -print -quit)
+          test -n "$source_archive"
+          rollback="$RUNNER_TEMP/paper-pro-reader-rc5-rollback-${READER_ROLLBACK:0:12}.tar.xz"
+          mv "$source_archive" "$rollback"
+          sha256sum "$rollback" >"$rollback.sha256"
+          package_dir=$(mktemp -d)
+          tar -xJf "$rollback" -C "$package_dir"
+          root="$package_dir/koreader"
+          test -x "$root/luajit"
+          file "$root/luajit" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64|aarch64)'
+          if grep -q '"nativeInk"' "$root/external.manifest.json"; then
+            echo 'rollback unexpectedly opts into native ink' >&2
+            exit 1
+          fi
+          tar -tJf "$rollback" >phase6n1b-koreader-output/rollback-contents.txt
+          cp "$rollback" "$rollback.sha256" phase6n1b-koreader-output/
+
+      - name: Package checksummed candidate and rollback bundle
+        run: |
+          set -euxo pipefail
+          out=phase6n1b-koreader-output
+          python3 - <<'PY'
+          import json, os
+          out = os.path.join(os.environ['GITHUB_WORKSPACE'], 'phase6n1b-koreader-output')
+          data = {
+              'schema_version': 1,
+              'kind': 'phase6n1b-koreader-poc-and-rollback',
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'accepted_reader_poc': os.environ['READER_POC'],
+              'rollback_source': os.environ['READER_ROLLBACK'],
+              'container': os.environ['KOREADER_IMAGE'],
+              'device_target': 'reMarkable Ferrari / OS 3.27.3.0',
+              'installation_authorized': False,
+          }
+          with open(os.path.join(out, 'source-manifest.json'), 'w') as handle:
+              json.dump(data, handle, indent=2, sort_keys=True)
+              handle.write('\n')
+          PY
+          (cd "$out" && sha256sum *.tar.xz source-manifest.json >SHA256SUMS)
+          bundle="$out/phase6n1b-koreader-target-${GITHUB_SHA:0:12}.tar.gz"
+          tar -czf "$bundle" -C "$out" \
+            $(find "$out" -maxdepth 1 -type f -printf '%f\n' \
+              | grep -v '^phase6n1b-koreader-target-')
+          sha256sum "$bundle" >"$bundle.sha256"
+
+      - name: Upload KOReader target qualification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: phase6n1b-koreader-target-${{ github.sha }}
+          archive: false
+          path: |
+            phase6n1b-koreader-output
+            phase6n1b-koreader-logs
