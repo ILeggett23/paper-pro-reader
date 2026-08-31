@@ -299,6 +299,7 @@ jobs:
     runs-on: ubuntu-22.04
     container:
       image: koreader/koremarkable@sha256:587457c7c63381905439ceef550dd4cd8148f427da4c21a9ede345d7099ab7ee
+      options: --user root
     steps:
       - uses: actions/checkout@v6
         with:
