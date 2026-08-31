@@ -221,7 +221,8 @@ jobs:
           grep -q 'NativeInkOverlay' "$out/appload-symbols.txt"
           stat -c 'mode=%a size=%s path=%n' "$candidate" \
             | tee "$out/appload-permissions.txt"
-          sha256sum "$candidate" >"$candidate.sha256"
+          (cd "$out" && sha256sum "$(basename "$candidate")" \
+            >"$(basename "$candidate").sha256")
 
           curl -fsSL \
             https://github.com/asivery/rm-appload/releases/download/v0.5.3/appload-aarch64.zip \
@@ -250,8 +251,8 @@ jobs:
             shims/qtfb-shim-32bit.so >SHA256SUMS)
           tar -czf "$out/phase6n1-appstack-rollback-v0.5.3.tar.gz" \
             -C "$rollback_dir" .
-          sha256sum "$out/phase6n1-appstack-rollback-v0.5.3.tar.gz" \
-            >"$out/phase6n1-appstack-rollback-v0.5.3.tar.gz.sha256"
+          (cd "$out" && sha256sum phase6n1-appstack-rollback-v0.5.3.tar.gz \
+            >phase6n1-appstack-rollback-v0.5.3.tar.gz.sha256)
 
           python3 - <<'PY'
           import json, os
@@ -283,7 +284,8 @@ jobs:
             appload-dynamic.txt appload-symbols.txt appload-permissions.txt \
             environment.txt host-tests.txt native-checks.txt secret-scan.txt \
             target-build.txt source-manifest.json SHA256SUMS
-          sha256sum "$bundle" >"$bundle.sha256"
+          (cd "$out" && sha256sum "$(basename "$bundle")" \
+            >"$(basename "$bundle").sha256")
 
       - name: Upload AppLoad target qualification
         if: always()
@@ -394,7 +396,8 @@ jobs:
           short_sha=${GITHUB_SHA:0:12}
           candidate="$RUNNER_TEMP/paper-pro-reader-phase6n1b-poc-${short_sha}.tar.xz"
           mv "$source_archive" "$candidate"
-          sha256sum "$candidate" >"$candidate.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$candidate")" \
+            >"$(basename "$candidate").sha256")
           package_dir=$(mktemp -d)
           tar -xJf "$candidate" -C "$package_dir"
           root="$package_dir/koreader"
@@ -436,7 +439,8 @@ jobs:
           test -n "$source_archive"
           rollback="$RUNNER_TEMP/paper-pro-reader-rc5-rollback-${READER_ROLLBACK:0:12}.tar.xz"
           mv "$source_archive" "$rollback"
-          sha256sum "$rollback" >"$rollback.sha256"
+          (cd "$RUNNER_TEMP" && sha256sum "$(basename "$rollback")" \
+            >"$(basename "$rollback").sha256")
           package_dir=$(mktemp -d)
           tar -xJf "$rollback" -C "$package_dir"
           root="$package_dir/koreader"
@@ -475,7 +479,8 @@ jobs:
           tar -czf "$bundle" -C "$out" \
             $(find "$out" -maxdepth 1 -type f -printf '%f\n' \
               | grep -v '^phase6n1b-koreader-target-')
-          sha256sum "$bundle" >"$bundle.sha256"
+          (cd "$out" && sha256sum "$(basename "$bundle")" \
+            >"$(basename "$bundle").sha256")
 
       - name: Upload KOReader target qualification
         if: always()
