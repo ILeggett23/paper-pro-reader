@@ -1,4 +1,5 @@
 local Blitbuffer = require("ffi/blitbuffer")
+local Event = require("ui/event")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -55,6 +56,24 @@ function ConversationMarker:onTapConversation()
     local conversation = self:currentConversation()
     if conversation and self.on_open then self.on_open(conversation.conversation_id) end
     return conversation ~= nil
+end
+
+function ConversationMarker:onGesture(gesture)
+    if self.on_touch_route then self.on_touch_route("touch_detected", gesture.ges) end
+    if InputContainer.onGesture(self, gesture) then
+        if self.on_touch_route then self.on_touch_route("conversation_marker", gesture.ges) end
+        return true
+    end
+
+    -- This marker is a small painted window above ReaderUI. An unmatched
+    -- gesture must be explicitly returned to the reader because UIManager only
+    -- dispatches normal input to the topmost non-toast window.
+    if self.on_touch_route then self.on_touch_route("reader_forwarded", gesture.ges) end
+    local handled = self.ui:handleEvent(Event:new("Gesture", gesture))
+    if self.on_touch_route then
+        self.on_touch_route(handled and "reader_handled" or "reader_unhandled", gesture.ges)
+    end
+    return handled
 end
 
 function ConversationMarker:attach()

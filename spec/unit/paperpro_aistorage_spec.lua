@@ -27,6 +27,9 @@ describe("Paper Pro AI settings, responses, and navigation", function()
         }
         local service = AISettings:new{ settings = settings }
         assert.is_false(service:saveBackend("http://reader.example", "token"))
+        assert.is_false(service:saveBackend("http://192.168.1.50:8787", "token"))
+        service:setAllowInsecureLAN(true)
+        assert.is_true(service:saveBackend("http://192.168.1.50:8787", "device-token"))
         assert.is_true(service:saveBackend("http://127.0.0.1:8787", "device-token"))
         assert.is_true(service:isConfigured())
         assert.are.same("device-token", service:getConfig().backend_token)

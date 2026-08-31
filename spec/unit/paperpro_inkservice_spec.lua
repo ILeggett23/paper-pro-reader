@@ -19,7 +19,7 @@ describe("Paper Pro InkService", function()
         }
         local canvas = {
             dimen = Geom:new{ x = 0, y = 0, w = 600, h = 800 },
-            segments = {}, finals = {}, restores = {},
+            segments = {}, finals = {}, completed = {}, restores = {}, cleanups = {},
             setService = function(self, service) self.service = service end,
             attach = function(self) self.attached = true end,
             detach = function(self) self.attached = false end,
@@ -32,7 +32,16 @@ describe("Paper Pro InkService", function()
             requestActiveSegment = function(self, previous, point)
                 table.insert(self.segments, { previous, point })
             end,
-            requestFinalStroke = function(self, stroke) table.insert(self.finals, stroke) end,
+            finishActiveStroke = function(self, stroke)
+                table.insert(self.completed, stroke)
+                return Geom:new{ x = 0, y = 0, w = 100, h = 100 }
+            end,
+            requestFinalStroke = function(self, stroke)
+                table.insert(self.finals, stroke)
+                return Geom:new{ x = 0, y = 0, w = 100, h = 100 }
+            end,
+            requestLiveRestore = function(self, region) table.insert(self.restores, region) end,
+            requestQualityCleanup = function(self, region) table.insert(self.cleanups, region) end,
             restoreRegion = function(self, region) table.insert(self.restores, region) end,
         }
         local current_page = 1
@@ -63,12 +72,25 @@ describe("Paper Pro InkService", function()
             end,
         }
         local renderer = InkRenderer:new{ width = 3 }
+        local scheduled = {}
+        local ui_manager = {
+            show = function() end, close = function() end,
+            scheduleIn = function(_, delay, task) scheduled[task] = delay end,
+            unschedule = function(_, task) scheduled[task] = nil end,
+        }
         local service = InkService:new{
             ui = {}, input = input, canvas = canvas, anchor = anchor,
             store = store, renderer = renderer,
-            ui_manager = { show = function() end, close = function() end },
+            ui_manager = ui_manager,
         }
-        return service, input, canvas, store, function(page) current_page = page end
+        local function runScheduled()
+            local tasks = {}
+            for task in pairs(scheduled) do table.insert(tasks, task) end
+            for _, task in ipairs(tasks) do scheduled[task] = nil; task() end
+        end
+        return service, input, canvas, store,
+            function(page) current_page = page; service:invalidateVisibleCache() end,
+            runScheduled
     end
 
     local function slot(id, x, y, timestamp, pressure, tool)
@@ -90,7 +112,7 @@ describe("Paper Pro InkService", function()
     end)
 
     it("routes pen down/move/up into separate ordered raw strokes", function()
-        local service, input, canvas, store = makeService()
+        local service, input, canvas, store, _, runScheduled = makeService()
         service:activate()
         assert.is_true(input.stylus_callback(input, slot(7, 10, 20, 1, 20)))
         input.stylus_callback(input, slot(7, 20, 30, 2, 30))
@@ -99,13 +121,16 @@ describe("Paper Pro InkService", function()
         assert.are.same(3, #service.strokes[1].points)
         assert.are.same(20, service.strokes[1].points[1].pressure)
         assert.are.same(30, service.strokes[1].points[2].pressure)
-        assert.are.same(1, #canvas.finals)
-        assert.is_true(store.save_count >= 1)
+        assert.are.same(1, #canvas.completed)
+        assert.is_nil(store.save_count)
 
         input.stylus_callback(input, slot(8, 50, 60, 4, nil))
         input.stylus_callback(input, slot(-1, 60, 70, 5, nil))
         assert.are.same(2, #service.strokes)
         assert.is_nil(service.strokes[2].points[1].pressure)
+        runScheduled()
+        assert.are.same(1, store.save_count)
+        assert.are.same(1, #canvas.cleanups)
     end)
 
     it("undoes, redoes, erases, and clears whole strokes", function()
@@ -136,6 +161,25 @@ describe("Paper Pro InkService", function()
         input.stylus_callback(input, slot(3, 40, 12, 3, nil, input.TOOL_TYPE_ERASER))
         input.stylus_callback(input, slot(-1, 40, 12, 4, nil, input.TOOL_TYPE_ERASER))
         assert.are.same(0, #service.strokes)
+    end)
+
+    it("continuously erases multiple strokes as one undo operation", function()
+        local service, input = makeService()
+        service:activate()
+        input.stylus_callback(input, slot(1, 10, 10, 1))
+        input.stylus_callback(input, slot(-1, 40, 10, 2))
+        input.stylus_callback(input, slot(2, 100, 100, 3))
+        input.stylus_callback(input, slot(-1, 130, 100, 4))
+        input.stylus_callback(input, slot(3, 200, 200, 5))
+        input.stylus_callback(input, slot(-1, 230, 200, 6))
+        input.stylus_callback(input, slot(4, 20, 10, 7, nil, input.TOOL_TYPE_ERASER))
+        input.stylus_callback(input, slot(4, 115, 100, 8, nil, input.TOOL_TYPE_ERASER))
+        input.stylus_callback(input, slot(-1, 115, 100, 9, nil, input.TOOL_TYPE_ERASER))
+        assert.are.same(1, #service.strokes)
+        assert.are.same("delete", service.undo_stack[#service.undo_stack].kind)
+        assert.are.same(2, #service.undo_stack[#service.undo_stack].records)
+        assert.is_true(service:undo())
+        assert.are.same(3, #service.strokes)
     end)
 
     it("renders only strokes for the current page", function()

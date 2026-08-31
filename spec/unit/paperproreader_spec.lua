@@ -1,16 +1,18 @@
 describe("Paper Pro Reader composition", function()
-    local DocumentRegistry, Geom, ReaderUI, Screen, Time, UIManager
+    local DocumentRegistry, Event, Geom, ReaderUI, Screen, Time, UIManager, WidgetContainer
     local readerui
 
     setup(function()
         require("commonrequire")
         disable_plugins()
         DocumentRegistry = require("document/documentregistry")
+        Event = require("ui/event")
         Geom = require("ui/geometry")
         ReaderUI = require("apps/reader/readerui")
         Screen = require("device").screen
         Time = require("ui/time")
         UIManager = require("ui/uimanager")
+        WidgetContainer = require("ui/widget/container/widgetcontainer")
         readerui = ReaderUI:new{
             dimen = Screen:getSize(),
             document = DocumentRegistry:openDocument("spec/front/unit/data/juliet.epub"),
@@ -80,16 +82,86 @@ describe("Paper Pro Reader composition", function()
         assert.are.same("Vocabulary", menu_items.paperpro_study.sub_item_table[2].text)
         assert.are.same("AI Questions", menu_items.paperpro_study.sub_item_table[3].text)
         assert.are.same("AI assistant", menu_items.paperpro_study.sub_item_table[4].text)
-        assert.are.same("Ink Mode", menu_items.paperpro_study.sub_item_table[5].text)
-        assert.is_true(menu_items.paperpro_study.sub_item_table[5].check_callback_closes_menu)
+        assert.are.same("Diagnostics", menu_items.paperpro_study.sub_item_table[5].text)
+        assert.are.same("Write Mode", menu_items.paperpro_study.sub_item_table[6].text)
+        assert.is_true(menu_items.paperpro_study.sub_item_table[6].check_callback_closes_menu)
+        assert.are.same("Palm rejection", menu_items.paperpro_study.sub_item_table[7].text)
     end)
 
-    it("attaches InkCanvas above ReaderUI on the reader Show event", function()
+    it("keeps InkCanvas below the gesture-forwarding marker in Read Mode", function()
         readerui.paperpro.ink_service:close()
+        readerui.paperpro.conversation_marker:detach()
         readerui.paperpro:onShow()
         assert.is_true(readerui.paperpro.ink_canvas.attached)
-        assert.is_equal(readerui.paperpro.ink_canvas,
+        assert.is_false(readerui.paperpro.ink_canvas.toast)
+        assert.is_equal(readerui.paperpro.conversation_marker,
             UIManager._window_stack[#UIManager._window_stack].widget)
+    end)
+
+    it("routes a real UIManager gesture through product surfaces to ReaderUI", function()
+        local forwarded
+        local original_handle = readerui.handleEvent
+        readerui.handleEvent = function(_, event)
+            forwarded = event
+            return true
+        end
+
+        UIManager:sendEvent(Event:new("Gesture", {
+            ges = "tap", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        }))
+        readerui.handleEvent = original_handle
+
+        assert.is_truthy(forwarded)
+        assert.are.same("onGesture", forwarded.handler)
+        assert.are.same("tap", forwarded.args[1].ges)
+    end)
+
+    it("blocks single-finger page gestures in strict Write Mode", function()
+        local forwarded
+        local original_handle = readerui.handleEvent
+        G_reader_settings:saveSetting("paperpro_palm_rejection_policy", "strict")
+        readerui.handleEvent = function(_, event)
+            forwarded = event
+            return true
+        end
+        assert.is_true(readerui.paperpro:enterWriteMode())
+        UIManager:sendEvent(Event:new("Gesture", {
+            ges = "swipe", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        }))
+        readerui.handleEvent = original_handle
+        assert.is_nil(forwarded)
+        assert.is_true(readerui.paperpro.ink_service.active)
+    end)
+
+    it("allows a deliberate Navigate control while preserving Read Mode routing", function()
+        local forwarded
+        local original_handle = readerui.handleEvent
+        readerui.handleEvent = function(_, event) forwarded = event; return true end
+        assert.is_true(readerui.paperpro:enterWriteMode())
+        assert.is_true(readerui.paperpro:_setWriteInteractionMode("navigate"))
+        UIManager:sendEvent(Event:new("Gesture", {
+            ges = "swipe", pos = Geom:new{ x = 100, y = 100, w = 0, h = 0 },
+        }))
+        readerui.handleEvent = original_handle
+        assert.is_truthy(forwarded)
+        assert.are.same("swipe", forwarded.args[1].ges)
+    end)
+
+    it("suppresses a selection event without leaving Write Mode", function()
+        assert.is_true(readerui.paperpro:enterWriteMode())
+        assert.is_true(readerui.paperpro:onShowSelectionActions({}, true))
+        assert.is_true(readerui.paperpro.ink_service.active)
+        assert.are.same("write", readerui.paperpro.write_toolbar.mode)
+        assert.is_false(readerui.paperpro.overlay:isOpen())
+    end)
+
+    it("suppresses InkCanvas painting while another UI window covers the reader", function()
+        assert.is_true(readerui.paperpro:_isReaderSurfaceActive())
+        local modal = WidgetContainer:new{ modal = true }
+        UIManager:show(modal)
+        assert.is_false(readerui.paperpro:_isReaderSurfaceActive())
+        UIManager:close(modal)
+        assert.is_true(readerui.paperpro:_isReaderSurfaceActive())
     end)
 
     it("uses the existing highlight annotation authority", function()

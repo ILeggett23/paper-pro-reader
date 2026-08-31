@@ -79,6 +79,50 @@ continues through normal gesture detection. Source-visible eraser tool values
 and the product erase mode both delete whole strokes, but physical Marker
 eraser behavior is unverified.
 
+RC1 physical testing exposed a product-window routing failure above this input
+pipeline: the always-attached ink canvas was the top UIManager window, so
+already-detected finger gestures never reached ReaderUI. RC2 keeps the canvas
+paint-only through UIManager's pass-through window contract and makes the
+conversation marker forward gestures outside its small target. The evdev node,
+coordinate transform, QTFB manifest, Input handler, and stylus callback are
+unchanged. Optional diagnostics record only `touch_route` state and gesture
+mode, never coordinates or reading content.
+
+RC2 physical testing proved Marker capture, coordinate routing, completed
+stroke rendering, undo, eraser, and persistence, but active strokes were not
+presented until pen lift. On the shimmed path, `fast` maps to the reMarkable DU
+waveform while the working final-stroke `ui` path maps to GL16. RC3 therefore
+uses the same bounded `ui` mode for live segment regions and queues every
+segment received before the next paint. It does not request full-screen or
+flashing refreshes and does not change QTFB/framebuffer code.
+
+RC3 physical testing rejected that GL16-per-segment policy: slow ink appeared,
+but normal-speed input caused HIGH latency, SEVERE ghosting, eraser/finger
+presentation regressions, and page ink repainting above menus and dialogs.
+RC4 preserves every sample while scheduling at most one bounded A2 presentation
+per 1/30 second, matching KOReader's existing interactive maximum rather than
+the generic e-ink 2 Hz quality-pan fallback.
+The current AppLoad shim explicitly translates reMarkable A2 to QTFB animate
+mode. Pen lift still performs one bounded `ui` quality cleanup. InkCanvas now
+paints only when ReaderUI plus its conversation marker are the active visible
+surface; menus, dialogs, keyboards, definitions, and AI overlays suppress it.
+
+RC4 physical testing established that waveform changes alone cannot make
+normal ReaderUI interaction safe for handwriting. RC5 separates Read Mode from
+an exclusive page-locked Write Mode. Strict mode blocks every page-area finger
+gesture; Automatic mode blocks during Marker contact plus a configurable
+300/500/900 ms post-pen guard based on existing KOReader gesture intervals.
+The direct toolbar provides Write, Undo, Eraser, Navigate, and Done controls to
+finger or Marker. No hover/proximity claim is made because QTFB exposes only
+press/update/release and separate finger contacts.
+
+Live A2 presentation now allows only one outstanding request and adapts its
+interval to observed UI presentation time. Pen lifts update memory/index only;
+one 500 ms writing-idle task performs the unioned quality cleanup and atomic
+persistence save. Page change, close, exit, suspend, and settings flush force
+the same operation. Continuous eraser movement removes every newly hit stroke,
+coalesces A2 restoration, and creates one Undo record per eraser gesture.
+
 ## Firmware and installation risks
 
 - reMarkable OS updates can change input-node numbering, QTFB compatibility,

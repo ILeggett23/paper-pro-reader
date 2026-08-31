@@ -1,0 +1,111 @@
+name: paper-pro-release-candidate
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches: [phase-6-paperpro-qualification]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  remarkable-aarch64:
+    name: reMarkable Paper Pro aarch64 RC
+    runs-on: ubuntu-22.04
+    container: koreader/koremarkable:2.1.0-22.04
+    env:
+      BASH_ENV: /home/ko/.bashrc
+      MAKEFLAGS: OUTPUT_DIR=build-remarkable INSTALL_DIR=install-remarkable TARGET=remarkable-aarch64 PARALLEL_JOBS=4
+      RC_VERSION: 0.6.0-rc5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          clean: false
+          fetch-depth: 0
+          filter: tree:0
+          show-progress: false
+
+      - name: Fetch upstream baseline and pinned dependencies
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --force --no-tags https://github.com/koreader/koreader.git refs/tags/v2026.07.1:refs/tags/v2026.07.1
+          make fetchthirdparty
+
+      - name: Verify official cross-toolchain
+        run: |
+          command -v aarch64-remarkable-linux-gnu-gcc
+          command -v aarch64-remarkable-linux-gnu-g++
+          aarch64-remarkable-linux-gnu-gcc --version
+
+      - name: Build native remarkable-aarch64 release
+        run: ./kodev release --ignore-translation remarkable-aarch64 txz
+
+      - name: Name and validate release candidate
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_archive="$(find . -maxdepth 1 -type f -name 'koreader-remarkable-aarch64-*.tar.xz' -print -quit)"
+          test -n "$source_archive"
+          short_sha="${GITHUB_SHA:0:12}"
+          artifact="paper-pro-reader-remarkable-aarch64-${RC_VERSION}-${short_sha}.tar.xz"
+          cp "$source_archive" "$artifact"
+          sha256sum "$artifact" >"${artifact}.sha256"
+          package_dir="$(mktemp -d)"
+          tar -xJf "$artifact" -C "$package_dir"
+          root="$package_dir/koreader"
+          test -x "$root/luajit"
+          test -x "$root/reader.lua"
+          test -x "$root/koreader.sh"
+          test -r "$root/external.manifest.json"
+          test -r "$root/external.manifest.shim.json"
+          test -r "$root/README_remarkable.md"
+          test -r "$root/frontend/apps/paperpro/release.lua"
+          test -r "$root/frontend/apps/paperpro/ink/inkquestionsession.lua"
+          test -r "$root/frontend/apps/paperpro/services/diagnostics.lua"
+          file "$root/luajit" | grep -E 'ELF 64-bit.*(ARM aarch64|ARM64|aarch64)'
+          readelf -h "$root/luajit" | grep -E 'Class:.*ELF64'
+          readelf -h "$root/luajit" | grep -E 'Machine:.*AArch64'
+          python3 -m json.tool "$root/external.manifest.json" >/dev/null
+          python3 -m json.tool "$root/external.manifest.shim.json" >/dev/null
+          if grep -R -E 'sk-[A-Za-z0-9_-]{20,}|OPENAI_API_KEY=|DEVICE_ACCESS_TOKEN=' "$root"; then
+            echo 'Secret-like material found in device package' >&2
+            exit 1
+          fi
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          checksum="$(cut -d' ' -f1 "${artifact}.sha256")"
+          printf '{"rc_version":"%s","commit":"%s","build_date":"%s","architecture":"aarch64","target":"remarkable-aarch64","artifact":"%s","sha256":"%s"}\n' \
+            "$RC_VERSION" "$GITHUB_SHA" "$build_date" "$artifact" "$checksum" >paper-pro-release-manifest.json
+          tar -tJf "$artifact" >paper-pro-package-contents.txt
+          printf 'artifact=%s\n' "$artifact" >>"$GITHUB_OUTPUT"
+          printf 'checksum=%s\n' "$checksum" >>"$GITHUB_OUTPUT"
+
+      - name: Upload Paper Pro release candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-pro-reader-remarkable-aarch64-${{ github.sha }}
+          archive: false
+          retention-days: 30
+          path: ${{ steps.package.outputs.artifact }}
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-pro-reader-remarkable-aarch64-${{ github.sha }}-metadata
+          retention-days: 30
+          path: |
+            ${{ steps.package.outputs.artifact }}.sha256
+            paper-pro-release-manifest.json
+            paper-pro-package-contents.txt
+
+# vim: foldmethod=marker foldlevel=0

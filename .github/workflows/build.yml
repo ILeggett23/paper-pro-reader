@@ -113,6 +113,9 @@ jobs:
           node --version
           npm --prefix backend test
 
+      - name: Scan for committed credentials
+        run: bash tools/paperpro-secret-scan.sh
+
       # GitHub forks do not expose the upstream repository's tag refs. Fetch
       # only our baseline tag: fetching every upstream tag can conflict with
       # actions/checkout's partial-clone promisor remote on fork-only objects.

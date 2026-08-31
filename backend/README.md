@@ -36,6 +36,9 @@ Optional:
 - `OPENAI_MODEL`: replaceable provider model, default `gpt-5.4-mini` for the
   Phase 4 development configuration.
 - `PROVIDER_TIMEOUT_MS`: upstream provider timeout, default `30000`.
+- `IDEMPOTENCY_DB_PATH`: restart-safe completed-response file, default
+  `./data/idempotency.json`.
+- `IDEMPOTENCY_TTL_SECONDS`: completed request retention, default `86400`.
 
 Never commit `.env`, a device token, or a provider key. Avoid putting secrets
 directly in reusable shell history. Production deployments should use their
@@ -105,10 +108,12 @@ Ordinary logs contain request ID, status, duration, and stable error category.
 They do not contain full questions, book excerpts, answers, bearer tokens, or
 provider keys. Provider output is treated only as text and is never executed.
 
-Completed request IDs are deduplicated in memory for 24 hours, up to 1,000
-entries. Deployments that require deduplication across restarts or multiple
-instances should replace `IdempotencyStore` with a shared durable adapter while
-preserving the same `run(requestId, task)` contract.
+The production entrypoint deduplicates completed request IDs across restart for
+24 hours, up to 1,000 entries, using an atomic mode-0600 JSON file in a
+mode-0700 directory. It stores request ID, completed response, creation time,
+and expiry only; no image, prompt, book context, or credential is retained.
+Multi-instance deployments still require a shared durable adapter behind the
+same `run(requestId, task)` contract.
 
 ## Tests
 
@@ -118,7 +123,7 @@ npm test
 
 Tests use mocked providers and do not require an OpenAI API key. They cover
 health, authentication, validation and size limits, prompt separation,
-provider success and failures, idempotency, privacy-safe logging, and the
+provider success and failures, restart-safe idempotency, privacy-safe logging, and the
 OpenAI Responses adapter. A live provider smoke test is intentionally opt-in
 and must never print or persist its key.
 

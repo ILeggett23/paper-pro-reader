@@ -163,6 +163,7 @@ frontend/apps/paperpro/
     responsestore.lua        local completed exchange authority
     anchornavigator.lua      validated ReaderLink/rolling/paging adapter
     conversationservice.lua  bounded local canonical conversation history
+    diagnostics.lua          safe RC/device/queue lifecycle evidence
   overlays/
     placement.lua            resolution-aware pure placement policy
     readeroverlay.lua        reusable bounded widget host/lifecycle
@@ -299,3 +300,47 @@ migrates Phase 4 exchanges into single-turn conversations and owns bounded
 follow-ups, recognition text, anchors, and optional retained question ink.
 The backend performs one multimodal response with qualitative recognition and
 continues using `store: false` with no tools or web search.
+
+Phase 6 adds release identity and opt-in diagnostics without changing engine
+or device adapters. The backend production entrypoint uses a restart-safe
+atomic idempotency file containing only completed response envelopes, request
+IDs, and expiry metadata; prompts, images, book context, and credentials are
+not retained. Linux CI builds the native `remarkable-aarch64` archive in
+KOReader's supported cross-toolchain image and validates ELF architecture,
+manifests, product modules, permissions, contents, secrets, and checksum.
+
+RC2 corrects a product-layer gesture routing error found on physical OS
+3.27.3.0 hardware. Passive ink remains a paint-only top-level surface, and the
+small conversation marker explicitly returns unmatched gestures to ReaderUI.
+This preserves the existing evdev -> Input -> gesture detector pipeline and
+does not change Paper Pro node selection, coordinates, QTFB, UIManager, or
+stylus filtering.
+
+RC3 retains that routing and changes only the product canvas's live paint
+policy. Active Marker segments are accumulated until `InkCanvas:paintTo()` and
+refreshed with bounded `ui` regions, matching the physically working pen-lift
+path. Finalization, anchors, storage, undo/redo, eraser, ReaderUI, UIManager,
+and framebuffer implementations are unchanged.
+
+RC4 replaces RC3's per-sample GL16 requests with a product-owned presentation
+scheduler. Stylus samples continue entering InkStroke immediately; InkCanvas
+unions their regions and schedules one A2 paint at the existing 30 Hz
+interactive ceiling. Pen lift cancels pending live work and uses the unchanged
+final `ui` cleanup. A window-stack predicate skips all canvas painting while a
+menu, dialog, keyboard, definition, or AI overlay covers ReaderUI. Touch routing
+diagnostics distinguish detection, forwarding, ReaderUI handling, and later
+page/position events without recording coordinates or content.
+
+RC5 adds a product-owned interaction controller rather than changing ReaderUI
+or Input. A top WriteToolbar consumes page-area finger gestures in strict mode,
+or during Marker contact/post-pen guard in automatic mode; Navigate explicitly
+forwards gestures through the existing RC2 route, and Done restores ordinary
+Read Mode. InkCanvas is a normal paint layer below the marker/toolbar and above
+ReaderUI, so higher menus/modals paint after it.
+
+InkService appends points and strokes in memory, updates the visible-location
+index incrementally, invalidates a projected-stroke cache only on location,
+dimension, or ink changes, and marks its unchanged schema-1 store dirty. A
+single 500 ms idle task performs unioned quality cleanup and atomic persistence;
+forced lifecycle flushes retain durability. Eraser samples remove newly hit
+strokes continuously and aggregate one delete operation for Undo.

@@ -43,8 +43,23 @@ Add handwritten-question recognition, text or handwriting-styled responses,
 expanded conversation/full-study states, and a complete library/study visual
 system using complete-line or completed-response e-ink updates.
 
-Implementation status: complete on `phase-5-book-writes-back`, pending review
-and merge into `main`.
+Implementation status: complete and merged into `main` by pull request #5.
+
+## Phase 6 — Release candidate and physical qualification
+
+Produce an identified Paper Pro aarch64 RC, persistent paid-request
+idempotency, safe diagnostics, installation/rollback guidance, and a structured
+user-driven hardware qualification loop.
+
+Stage A status: complete on `phase-6-paperpro-qualification`. RC1 installed and
+rendered on OS 3.27.3.0 but was blocked by a product-overlay touch-routing
+failure. RC2 physically fixed touch and validated core reading, notes, and ink
+persistence; live ink remained invisible until pen lift. RC3 proved live
+presentation but failed at normal speed and contaminated higher UI layers. RC4
+still allowed writing and ReaderUI gestures to compete. RC5 adds exclusive
+Write/Read interaction modes, palm suppression, idle cleanup/persistence, and
+continuous erasing and remains pending physical retest. Phase 6 stays open
+until that evidence is reviewed.
 
 The next phase should focus only on physical Paper Pro qualification and
 product polish: real Marker/refresh/latency evidence, shared backend
