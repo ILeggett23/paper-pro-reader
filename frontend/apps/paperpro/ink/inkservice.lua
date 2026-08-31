@@ -336,6 +336,11 @@ function InkService:_recordRegion(records)
     return region
 end
 
+function InkService:_requestLiveRestore(region)
+    if self.canvas.requestLiveRestore then return self.canvas:requestLiveRestore(region) end
+    return self.canvas:restoreRegion(region)
+end
+
 function InkService:_removeRecord(record)
     for index, stroke in ipairs(self.strokes) do
         if stroke.id == record.stroke.id then
@@ -367,7 +372,7 @@ function InkService:_applyOperation(action, undo)
     for _, record in ipairs(action.records) do
         if insert then self:_insertRecord(record) else self:_removeRecord(record) end
     end
-    self.canvas:requestLiveRestore(region)
+    self:_requestLiveRestore(region)
     self:_markDirty(region)
 end
 
@@ -399,7 +404,7 @@ function InkService:_deleteRecords(records)
     table.sort(records, function(left, right) return left.index > right.index end)
     for _, record in ipairs(records) do self:_removeRecord(record) end
     self:_pushOperation({ kind = "delete", records = records })
-    self.canvas:requestLiveRestore(region)
+    self:_requestLiveRestore(region)
     self:_markDirty(region)
     return true
 end
@@ -431,7 +436,7 @@ function InkService:_eraseGestureAt(point)
                 if region then
                     self.eraser_region = self.eraser_region
                         and self.eraser_region:combine(region) or region:copy()
-                    self.canvas:requestLiveRestore(region)
+                    self:_requestLiveRestore(region)
                 end
                 removed = true
             end
