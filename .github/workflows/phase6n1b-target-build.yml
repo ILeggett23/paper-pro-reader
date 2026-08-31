@@ -97,7 +97,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y build-essential cmake curl file git ninja-build \
-            python3 qt6-base-dev unzip
+            python3 qt6-base-dev qt6-declarative-dev unzip
           ln -sf /usr/lib/qt6/libexec/rcc /usr/local/bin/rcc
 
       - name: Reconstruct accepted AppLoad source
