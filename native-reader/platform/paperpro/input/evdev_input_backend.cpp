@@ -281,6 +281,11 @@ struct EvdevInputBackend::Impl {
     }
 
     void handleMarker(const input_event& event, MonotonicNs receipt) noexcept {
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+            healthy.store(false, std::memory_order_release);
+            notify();
+            return;
+        }
         if (event.type == EV_ABS) {
             if (event.code == ABS_X) {
                 marker_state.raw_x = event.value;
@@ -302,7 +307,10 @@ struct EvdevInputBackend::Impl {
 
     void emitTouch(InputEventType type, int slot, Point point, MonotonicNs receipt) noexcept {
         const InputEvent event{type, point, receipt, ++sequence, slot, 0, Tool::Pen};
-        if (!touch_ring.push(event)) touch_dropped.fetch_add(1, std::memory_order_relaxed);
+        if (!touch_ring.push(event)) {
+            touch_dropped.fetch_add(1, std::memory_order_relaxed);
+            healthy.store(false, std::memory_order_release);
+        }
         notify();
     }
 
@@ -328,6 +336,11 @@ struct EvdevInputBackend::Impl {
     }
 
     void handleTouch(const input_event& event, MonotonicNs receipt) noexcept {
+        if (event.type == EV_SYN && event.code == SYN_DROPPED) {
+            healthy.store(false, std::memory_order_release);
+            notify();
+            return;
+        }
         if (event.type == EV_ABS) {
             if (event.code == ABS_MT_SLOT) {
                 current_touch_slot = std::clamp(event.value, 0,
@@ -357,7 +370,7 @@ struct EvdevInputBackend::Impl {
         if (event.type == EV_KEY && event.code == KEY_POWER && event.value == 1) {
             const InputEvent power{InputEventType::PowerPressed, {}, receipt,
                 ++sequence, -1, 0, Tool::Pen};
-            control_ring.push(power);
+            if (!control_ring.push(power)) healthy.store(false, std::memory_order_release);
             notify();
         }
     }

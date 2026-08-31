@@ -77,7 +77,7 @@ int BenchmarkApp::run() {
         shutdown_reason = "display_submission_failure";
         exit_code = 6;
     }
-    watchdog.ready();
+    if (exit_code == 0) watchdog.ready();
 
     bool running = exit_code == 0;
     std::optional<Point> last_marker_point;
