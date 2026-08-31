@@ -18,9 +18,9 @@ verified.
 RC3 requested one GL16 `ui` refresh for every active segment. UIManager already
 supports `a2`; the reMarkable framebuffer maps it to waveform A2, and the
 current AppLoad shim translates A2 (`0x04`) to QTFB
-`REFRESH_MODE_ANIMATE`. KOReader's ReaderUI caps ordinary interactive panning
-at 30 Hz on devices not marked low-pan-rate. RC4 reuses that established
-ceiling instead of inventing an unverified interval.
+`REFRESH_MODE_ANIMATE`. KOReader's ReaderUI defines 30 Hz as its interactive
+maximum. RC4 reuses that established ceiling for the explicitly low-latency A2
+path instead of inheriting the generic e-ink 2 Hz quality-pan fallback.
 
 ## Minimal RC4 change
 

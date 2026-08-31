@@ -100,7 +100,8 @@ RC3 physical testing rejected that GL16-per-segment policy: slow ink appeared,
 but normal-speed input caused HIGH latency, SEVERE ghosting, eraser/finger
 presentation regressions, and page ink repainting above menus and dialogs.
 RC4 preserves every sample while scheduling at most one bounded A2 presentation
-per 1/30 second, matching KOReader's existing normal interactive pan ceiling.
+per 1/30 second, matching KOReader's existing interactive maximum rather than
+the generic e-ink 2 Hz quality-pan fallback.
 The current AppLoad shim explicitly translates reMarkable A2 to QTFB animate
 mode. Pen lift still performs one bounded `ui` quality cleanup. InkCanvas now
 paints only when ReaderUI plus its conversation marker are the active visible

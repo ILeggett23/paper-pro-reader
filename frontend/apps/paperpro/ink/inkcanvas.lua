@@ -1,5 +1,4 @@
 local Blitbuffer = require("ffi/blitbuffer")
-local Device = require("device")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
@@ -7,7 +6,7 @@ local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
-local Screen = Device.screen
+local ACTIVE_REFRESH_HZ = 30
 
 local InkCanvas = WidgetContainer:extend{
     -- Ink is a paint-only surface. UIManager's toast contract keeps it in the
@@ -20,10 +19,11 @@ local InkCanvas = WidgetContainer:extend{
 function InkCanvas:init()
     self.ui_manager = self.ui_manager or UIManager
     self.dimen = self.dimen or Geom:new{ x = 0, y = 0, w = 600, h = 800 }
-    -- Match KOReader's existing interactive pan ceiling: 30 Hz normally, or
-    -- 2 Hz only on devices already classified as low-pan-rate.
+    -- Use KOReader's existing 30 Hz interactive maximum. The generic e-ink
+    -- low-pan setting targets expensive quality refreshes and would reduce
+    -- live A2 ink to 2 Hz, which cannot meet the physical latency requirement.
     self.active_refresh_interval = self.active_refresh_interval
-        or 1 / (Screen.low_pan_rate and 2 or 30)
+        or 1 / ACTIVE_REFRESH_HZ
     self.paint_segments = {}
     self.pending_region = nil
     self.active_refresh_scheduled = false
