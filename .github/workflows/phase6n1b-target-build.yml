@@ -172,8 +172,8 @@ jobs:
             printf 'xovi_commit=%s\n' "$XOVI_COMMIT"
             uname -a
             cat /etc/os-release
-            "$CC" --version
-            "$CXX" --version
+            "${CC%% *}" --version
+            "${CXX%% *}" --version
             qmake6 -v
             qmake6 -query
             pkg-config --modversion Qt6Core
