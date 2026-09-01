@@ -36,6 +36,9 @@ public:
     [[nodiscard]] std::uint64_t markerSamplesDropped() const noexcept override { return dropped_; }
     [[nodiscard]] std::size_t markerRingHighWater() const noexcept override { return ring_.highWater(); }
     [[nodiscard]] bool healthy() const noexcept override { return true; }
+    [[nodiscard]] std::string diagnosticSummary() const override {
+        return "{\"schema_version\":1,\"backend\":\"synthetic\"}";
+    }
 
     void stop() noexcept override {
         started_ = false;

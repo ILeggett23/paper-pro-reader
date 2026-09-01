@@ -10,3 +10,4 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 )
 "$root/scripts/test-lifecycle.sh"
 "$root/scripts/secret-and-content-scan.sh"
+"$root/scripts/dependency-scan.sh"

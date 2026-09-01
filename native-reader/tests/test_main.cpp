@@ -187,6 +187,21 @@ void testInkAndContinuousEraser() {
     EXPECT(test, model.visibleStrokeCount() == 3);
 }
 
+void testSparseEraserSegmentCrossing() {
+    constexpr auto test = "sparse_eraser_segment_crossing";
+    paperpro::InkModel model;
+    addStroke(model, {50, 20}, {50, 120}, 1);
+    EXPECT(test, model.visibleStrokeCount() == 1);
+    model.beginEraser();
+    // Neither endpoint touches the stroke; the swept path crosses it.
+    const auto dirty = model.eraseSegment({0, 70}, {100, 70}, 8);
+    EXPECT(test, dirty.has_value());
+    EXPECT(test, model.finishEraser());
+    EXPECT(test, model.visibleStrokeCount() == 0);
+    EXPECT(test, model.undo().has_value());
+    EXPECT(test, model.visibleStrokeCount() == 1);
+}
+
 void testClearUndoGrouping() {
     constexpr auto test = "clear_undo";
     paperpro::InkModel model;
@@ -377,6 +392,7 @@ int main() {
     testPalmControlsSuppressedDuringMarker();
     testMarkerLiftOutsideCanvasIsClipped();
     testInkAndContinuousEraser();
+    testSparseEraserSegmentCrossing();
     testClearUndoGrouping();
     testDirtyBounds();
     testRefreshCoalescingAndOutstanding();

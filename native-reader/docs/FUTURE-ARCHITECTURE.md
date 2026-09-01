@@ -11,6 +11,11 @@ The application is a reading application that temporarily coexists with
 Xochitl. It is not an operating system, notebook-suite, cloud-service,
 firmware, account, or proprietary synchronization replacement.
 
+Explicitly deferred beyond the reading application are reMarkable cloud
+services, firmware updates, stock account handling, the complete notebook
+system, handwriting-to-text conversion, Type Folio support, general operating-
+system settings, and proprietary Xochitl synchronization formats.
+
 ## Architectural priorities
 
 Every trade-off is evaluated in this order:

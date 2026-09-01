@@ -167,7 +167,9 @@ bool LatencyRecorder::writeReport(const std::string& path, std::string_view back
         << (xochitl_managed_externally ? "null" : "true")
         << "}\n";
 
-    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    // JSON Lines is append-only so QTFB/takeover reruns retain independent
+    // session evidence. The launchers also use backend-specific files.
+    std::ofstream output(path, std::ios::binary | std::ios::app);
     if (!output) {
         error = "could not open benchmark report";
         return false;

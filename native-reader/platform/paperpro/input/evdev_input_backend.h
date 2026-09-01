@@ -31,6 +31,7 @@ public:
     [[nodiscard]] std::uint64_t markerSamplesDropped() const noexcept override;
     [[nodiscard]] std::size_t markerRingHighWater() const noexcept override;
     [[nodiscard]] bool healthy() const noexcept override;
+    [[nodiscard]] std::string diagnosticSummary() const override;
     void stop() noexcept override;
 
 private:

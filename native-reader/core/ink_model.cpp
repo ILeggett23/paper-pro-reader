@@ -117,14 +117,76 @@ bool InkModel::hitTest(const StrokeDescriptor& stroke, Point point, int radius) 
     return false;
 }
 
+bool InkModel::segmentsIntersect(Point a, Point b, Point c, Point d) noexcept {
+    const auto cross = [](Point p, Point q, Point r) -> std::int64_t {
+        return static_cast<std::int64_t>(q.x - p.x) * (r.y - p.y)
+            - static_cast<std::int64_t>(q.y - p.y) * (r.x - p.x);
+    };
+    const auto on_segment = [](Point p, Point q, Point r) {
+        return q.x >= std::min(p.x, r.x) && q.x <= std::max(p.x, r.x)
+            && q.y >= std::min(p.y, r.y) && q.y <= std::max(p.y, r.y);
+    };
+    const auto ab_c = cross(a, b, c);
+    const auto ab_d = cross(a, b, d);
+    const auto cd_a = cross(c, d, a);
+    const auto cd_b = cross(c, d, b);
+    if (((ab_c > 0 && ab_d < 0) || (ab_c < 0 && ab_d > 0))
+        && ((cd_a > 0 && cd_b < 0) || (cd_a < 0 && cd_b > 0))) {
+        return true;
+    }
+    return (ab_c == 0 && on_segment(a, c, b))
+        || (ab_d == 0 && on_segment(a, d, b))
+        || (cd_a == 0 && on_segment(c, a, d))
+        || (cd_b == 0 && on_segment(c, b, d));
+}
+
+std::int64_t InkModel::segmentPairDistanceSquared(Point a, Point b,
+    Point c, Point d) noexcept {
+    if (segmentsIntersect(a, b, c, d)) return 0;
+    return std::min({
+        segmentDistanceSquared(a, c, d),
+        segmentDistanceSquared(b, c, d),
+        segmentDistanceSquared(c, a, b),
+        segmentDistanceSquared(d, a, b),
+    });
+}
+
+bool InkModel::hitTestSegment(const StrokeDescriptor& stroke, Point start,
+    Point end, int radius) const noexcept {
+    const Rect eraser_bounds{
+        std::min(start.x, end.x) - radius,
+        std::min(start.y, end.y) - radius,
+        std::abs(end.x - start.x) + radius * 2 + 1,
+        std::abs(end.y - start.y) + radius * 2 + 1,
+    };
+    if (!eraser_bounds.intersects(stroke.bounds)) return false;
+    const auto radius_squared = static_cast<std::int64_t>(radius) * radius;
+    const auto* samples = points_.data() + stroke.offset;
+    if (stroke.count == 1) {
+        return segmentDistanceSquared(samples[0].position, start, end) <= radius_squared;
+    }
+    for (std::size_t index = 1; index < stroke.count; ++index) {
+        if (segmentPairDistanceSquared(start, end,
+                samples[index - 1].position, samples[index].position) <= radius_squared) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::optional<Rect> InkModel::eraseAt(Point point, int radius) noexcept {
+    return eraseSegment(point, point, radius);
+}
+
+std::optional<Rect> InkModel::eraseSegment(Point start, Point end,
+    int radius) noexcept {
     if (!eraser_active_) beginEraser();
     Rect dirty;
     bool erased = false;
     for (std::size_t index = 0; index < stroke_count_; ++index) {
         auto& stroke = strokes_[index];
         if (!stroke.visible || erased_in_gesture_[index]) continue;
-        if (!hitTest(stroke, point, radius)) continue;
+        if (!hitTestSegment(stroke, start, end, radius)) continue;
         stroke.visible = false;
         erased_in_gesture_[index] = true;
         if (eraser_operation_.count < kMaxStrokes) {

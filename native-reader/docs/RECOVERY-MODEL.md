@@ -35,8 +35,8 @@ The package lives under
 locks live under `/run/paper-pro-reader-native`; transient service files live
 under `/run/systemd/system`. Installation does not write a persistent unit to
 `/etc`, remount the immutable root, or enable takeover at boot. The privacy-safe
-benchmark report is
-`/home/root/.local/state/paper-pro-reader-native/benchmark.jsonl`.
+benchmark reports are append-only backend-specific files under
+`/home/root/.local/state/paper-pro-reader-native/`.
 
 ## State machine
 
@@ -173,10 +173,11 @@ physical qualification. The stock UI remains responsible for normal suspend.
 ## Low battery and power loss
 
 The launcher checks a conservative configurable battery threshold and may
-allow a lower value only while external power is confirmed. During a session,
-a low-battery event requests the same orderly exit as the on-screen control.
-Input-to-display processing remains prioritized until shutdown begins; no
-synchronous battery logging enters the Marker path.
+allow a lower value only while external power is confirmed. Phase 1 does not
+poll battery state after launch because that monitoring has not yet been
+qualified outside the Marker path. The device procedure records capacity
+before and after a bounded run; a low-battery runtime exit remains deferred and
+must be reported `INCONCLUSIVE`, not claimed as implemented.
 
 No userspace mechanism can guarantee restoration after abrupt power loss.
 After reboot, the service must default to stock Xochitl and must not

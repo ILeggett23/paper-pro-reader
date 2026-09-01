@@ -8,7 +8,7 @@
       "commit": "39262ee0bef69915e3ead3ac218d5973916f422a",
       "license": "MIT",
       "source": "https://github.com/MaximeRivest/quill",
-      "redistributed": "ABI header and license only",
+      "redistributed": "source tree: ABI header and MIT license; device package: MIT license notice only",
       "runtime": "user-built device-local libquill.so"
     },
     {
@@ -30,6 +30,23 @@
       "runtime": "external launcher prerequisite"
     },
     {
+      "name": "qt-resource-rebuilder (rm-xovi-extensions)",
+      "version": "v19-23052026",
+      "commit": "7874154dba6793cc68a15fae0fb9dd272c4ed20a",
+      "license": "GPL-3.0-only",
+      "source": "https://github.com/asivery/rm-xovi-extensions",
+      "redistributed": "no",
+      "runtime": "external Xovi/AppLoad maintenance prerequisite"
+    },
+    {
+      "name": "Qt Core/Gui",
+      "version": "6.8.2 from the selected device/SDK runtime",
+      "license": "LGPL-3.0-only OR GPL-3.0-only",
+      "source": "https://doc.qt.io/qt-6/licensing.html",
+      "redistributed": "no",
+      "runtime": "used behind the operator-built Quill adapter only"
+    },
+    {
       "name": "Ferrari public SDK",
       "version": "remarkable-production-image-5.7.119-ferrari-public (3.27.0.97)",
       "sha256": "324d77d84dda5ba8fac484107b3c9981daaa28fe5ebed6589172f0cb1bcdd020",
@@ -44,6 +61,32 @@
       "license": "proprietary reMarkable software",
       "redistributed": "never",
       "runtime": "loaded only through the operator-built Quill adapter"
+    },
+    {
+      "name": "Ferrari SDK libc/libstdc++ runtime ABI",
+      "version": "5.7.119-ferrari sysroot; ELF needs libc.so.6, libstdc++.so.6, libm.so.6, libgcc_s.so.1",
+      "license": "LGPL-2.1-or-later / GCC Runtime Library Exception as applicable",
+      "source": "official Ferrari public SDK",
+      "redistributed": "no",
+      "runtime": "device system libraries"
+    },
+    {
+      "name": "actions/checkout",
+      "version": "v6",
+      "commit": "d23441a48e516b6c34aea4fa41551a30e30af803",
+      "license": "MIT",
+      "source": "https://github.com/actions/checkout",
+      "redistributed": "no",
+      "runtime": "CI-only"
+    },
+    {
+      "name": "actions/upload-artifact",
+      "version": "v7",
+      "commit": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+      "license": "MIT",
+      "source": "https://github.com/actions/upload-artifact",
+      "redistributed": "no",
+      "runtime": "CI-only"
     }
   ]
 }

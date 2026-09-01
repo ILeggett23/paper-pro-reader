@@ -12,6 +12,7 @@
 #include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -103,6 +104,15 @@ struct EvdevInputBackend::Impl {
     std::mutex wait_mutex;
     std::condition_variable wait_condition;
     std::uint32_t sequence = 0;
+    AxisRange marker_x_range;
+    AxisRange marker_y_range;
+    AxisRange marker_pressure_range;
+    AxisRange touch_x_range;
+    AxisRange touch_y_range;
+    bool marker_pressure_advertised = false;
+    std::string selected_marker_path;
+    std::string selected_touch_path;
+    std::string selected_power_path;
 
 #if defined(__linux__)
     int epoll_descriptor = -1;
@@ -208,6 +218,9 @@ struct EvdevInputBackend::Impl {
         std::string touch_path;
         std::string power_path;
         if (!chooseDevices(marker_path, touch_path, power_path, error)) return false;
+        selected_marker_path = marker_path;
+        selected_touch_path = touch_path;
+        selected_power_path = power_path;
         marker_descriptor = ::open(marker_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         touch_descriptor = ::open(touch_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (marker_descriptor < 0 || touch_descriptor < 0) {
@@ -228,6 +241,12 @@ struct EvdevInputBackend::Impl {
             error = "evdev devices did not expose valid ABS coordinate ranges";
             return false;
         }
+        marker_x_range = marker_x;
+        marker_y_range = marker_y;
+        touch_x_range = touch_x;
+        touch_y_range = touch_y;
+        marker_pressure_advertised = queryRange(marker_descriptor,
+            ABS_PRESSURE, marker_pressure_range);
         marker_transform.emplace(marker_x, marker_y, config.display_width,
             config.display_height, config.rotation);
         touch_transform.emplace(touch_x, touch_y, config.display_width,
@@ -514,6 +533,30 @@ std::size_t EvdevInputBackend::markerRingHighWater() const noexcept {
 
 bool EvdevInputBackend::healthy() const noexcept {
     return impl_->healthy.load(std::memory_order_acquire);
+}
+
+std::string EvdevInputBackend::diagnosticSummary() const {
+    std::ostringstream output;
+    output << "{\"schema_version\":1,\"backend\":\"evdev\""
+        << ",\"marker_device\":\"" << impl_->selected_marker_path << "\""
+        << ",\"touch_device\":\"" << impl_->selected_touch_path << "\""
+        << ",\"power_device\":\"" << impl_->selected_power_path << "\""
+        << ",\"marker_abs\":{\"x_min\":" << impl_->marker_x_range.minimum
+        << ",\"x_max\":" << impl_->marker_x_range.maximum
+        << ",\"y_min\":" << impl_->marker_y_range.minimum
+        << ",\"y_max\":" << impl_->marker_y_range.maximum << "}"
+        << ",\"touch_abs\":{\"x_min\":" << impl_->touch_x_range.minimum
+        << ",\"x_max\":" << impl_->touch_x_range.maximum
+        << ",\"y_min\":" << impl_->touch_y_range.minimum
+        << ",\"y_max\":" << impl_->touch_y_range.maximum << "}"
+        << ",\"pressure\":{\"advertised\":"
+        << (impl_->marker_pressure_advertised ? "true" : "false");
+    if (impl_->marker_pressure_advertised) {
+        output << ",\"min\":" << impl_->marker_pressure_range.minimum
+            << ",\"max\":" << impl_->marker_pressure_range.maximum;
+    }
+    output << "}}";
+    return output.str();
 }
 
 void EvdevInputBackend::stop() noexcept {

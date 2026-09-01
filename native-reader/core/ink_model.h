@@ -36,6 +36,8 @@ public:
 
     void beginEraser() noexcept;
     [[nodiscard]] std::optional<Rect> eraseAt(Point point, int radius) noexcept;
+    [[nodiscard]] std::optional<Rect> eraseSegment(Point start, Point end,
+        int radius) noexcept;
     bool finishEraser() noexcept;
 
     [[nodiscard]] std::optional<Rect> undo() noexcept;
@@ -81,7 +83,13 @@ private:
     [[nodiscard]] static Rect pointBounds(Point point) noexcept;
     [[nodiscard]] static std::int64_t segmentDistanceSquared(
         Point point, Point start, Point end) noexcept;
+    [[nodiscard]] static bool segmentsIntersect(Point a, Point b,
+        Point c, Point d) noexcept;
+    [[nodiscard]] static std::int64_t segmentPairDistanceSquared(
+        Point a, Point b, Point c, Point d) noexcept;
     [[nodiscard]] bool hitTest(const StrokeDescriptor& stroke, Point point, int radius) const noexcept;
+    [[nodiscard]] bool hitTestSegment(const StrokeDescriptor& stroke,
+        Point start, Point end, int radius) const noexcept;
     void pushUndo(const UndoOperation& operation) noexcept;
     [[nodiscard]] Rect operationBounds(const UndoOperation& operation) const noexcept;
 

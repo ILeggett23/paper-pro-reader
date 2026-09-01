@@ -32,6 +32,7 @@ public:
     [[nodiscard]] virtual std::uint64_t markerSamplesDropped() const noexcept = 0;
     [[nodiscard]] virtual std::size_t markerRingHighWater() const noexcept = 0;
     [[nodiscard]] virtual bool healthy() const noexcept = 0;
+    [[nodiscard]] virtual std::string diagnosticSummary() const = 0;
     virtual void stop() noexcept = 0;
 };
 

@@ -25,7 +25,7 @@ jobs:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Configure and test C++20 core
@@ -38,12 +38,13 @@ jobs:
         run: |
           native-reader/scripts/test-lifecycle.sh
           native-reader/scripts/secret-and-content-scan.sh
+          native-reader/scripts/dependency-scan.sh
 
   sanitizers:
     name: ASan and UBSan
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Sanitized host suite
@@ -63,7 +64,7 @@ jobs:
       SDK_URL: https://storage.googleapis.com/remarkable-codex-toolchain/3.27.0.97/ferrari/remarkable-production-image-5.7.119-ferrari-public-x86_64-toolchain.sh
       SDK_SHA256: 324d77d84dda5ba8fac484107b3c9981daaa28fe5ebed6589172f0cb1bcdd020
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Download and verify official Ferrari toolchain
@@ -108,7 +109,7 @@ jobs:
           ! grep -E '\.(so|epub|pdf|rmdoc|rm)$' /tmp/native-reader-contents.txt
           ! grep -E 'libqsgepaper|libquill|OPENAI_API_KEY|DEVICE_ACCESS_TOKEN' /tmp/native-reader-contents.txt
       - name: Upload deterministic Ferrari package
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: paper-pro-reader-native-${{ github.sha }}
           retention-days: 30

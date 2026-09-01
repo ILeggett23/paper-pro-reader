@@ -10,7 +10,7 @@ fi
 
 install_root=${PPR_INSTALL_ROOT:-/home/root/xovi/exthome/appload/paper-pro-reader-native}
 systemctl_bin=${PPR_SYSTEMCTL:-systemctl}
-report_path=${PPR_BENCHMARK_REPORT:-/home/root/.local/state/paper-pro-reader-native/benchmark.jsonl}
+report_path=${PPR_BENCHMARK_REPORT:-/home/root/.local/state/paper-pro-reader-native/benchmark-takeover.jsonl}
 quill_library=${PPR_QUILL_LIBRARY:-/home/root/.local/lib/paper-pro-reader/libquill.so}
 quill_commit_file=${PPR_QUILL_COMMIT_FILE:-/home/root/.local/lib/paper-pro-reader/quill.commit}
 vendor_library=${PPR_VENDOR_LIBRARY_PATH:-/usr/lib/plugins/scenegraph/libqsgepaper.so}

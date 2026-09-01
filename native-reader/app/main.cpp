@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
             return 4;
         }
         input.stop();
-        std::cout << "INPUT_PROBE_OK\n";
+        std::cout << "INPUT_PROBE_OK " << input.diagnosticSummary() << '\n';
         return 0;
     }
 

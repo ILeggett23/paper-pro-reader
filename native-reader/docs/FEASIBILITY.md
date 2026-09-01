@@ -147,8 +147,9 @@ They cannot prove:
 - CPU, memory, and battery impact on the target; or
 - restoration after killing the real process while it owns the display.
 
-The benchmark report is written outside the Marker hot path to
-`/home/root/.local/state/paper-pro-reader-native/benchmark.jsonl`. Those items
+The append-only benchmark reports are written outside the Marker hot path to
+backend-specific `benchmark-qtfb.jsonl` and `benchmark-takeover.jsonl` files
+under `/home/root/.local/state/paper-pro-reader-native/`. Those items
 remain `NOT RUN` until the procedure in
 `DEVICE-QUALIFICATION.md` is returned with evidence. No EPUB migration begins
 before that gate.

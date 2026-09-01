@@ -22,9 +22,9 @@ returns evidence. Current overall status: **DEVICE TEST REQUIRED**.
 Set these values on the host. Replace only the three angle-bracket values:
 
 ```sh
-export PPR_DEVICE=<PAPER_PRO_IP>
-export PPR_ARCHIVE=<PAPER_PRO_NATIVE_TAR>
-export PPR_SHA_FILE=<PAPER_PRO_NATIVE_TAR_SHA256>
+export PPR_DEVICE='PAPER_PRO_IP'
+export PPR_ARCHIVE='ABSOLUTE_PATH_TO_PAPER_PRO_NATIVE_TAR'
+export PPR_SHA_FILE='ABSOLUTE_PATH_TO_PAPER_PRO_NATIVE_TAR_SHA256'
 ```
 
 ## 1. Verify the archive checksum
@@ -91,13 +91,45 @@ Do not rebuild Xovi, replace AppLoad, or replace QTFB for this test.
 
 ## 4. Confirm SSH recovery access
 
-Open a second host terminal and keep it open:
+Open a second host terminal and keep the interactive shell open for the entire
+takeover test:
 
 ```sh
-ssh root@"$PPR_DEVICE" 'printf "SSH_RECOVERY_OK\\n"; systemctl is-active xochitl.service'
+ssh root@"$PPR_DEVICE"
+printf 'SSH_RECOVERY_OK\n'
+systemctl is-active xochitl.service
 ```
 
-The first line must be `SSH_RECOVERY_OK`. Record Xochitl's initial state.
+The first line must be `SSH_RECOVERY_OK`. Record Xochitl's initial state and do
+not type `exit` in this recovery shell.
+
+From a separate host terminal, capture the compatibility tuple, installed
+launcher hashes, capability bitmaps, selected nodes, ABS ranges, and advertised
+pressure range without reading any input samples:
+
+```sh
+ssh root@"$PPR_DEVICE" '
+set -eu
+cat /sys/devices/soc0/machine
+grep -E "^(PRETTY_NAME|VERSION_ID)=" /etc/os-release
+uname -a
+for event in /sys/class/input/event*; do
+  printf "INPUT %s name=%s ev=%s key=%s abs=%s\n" \
+    "${event##*/}" "$(cat "$event/device/name")" \
+    "$(cat "$event/device/capabilities/ev")" \
+    "$(cat "$event/device/capabilities/key")" \
+    "$(cat "$event/device/capabilities/abs")"
+done
+find /home/root/xovi /home/root/shims -maxdepth 5 -type f \
+  \( -iname "*appload*" -o -name "qtfb-shim*.so" -o -iname "*resource*rebuilder*" \) \
+  -exec sha256sum {} \;
+/home/root/xovi/exthome/appload/paper-pro-reader-native/bin/paper-pro-reader-benchmark --probe-input
+' | tee paper-pro-native-compatibility.txt
+```
+
+The `--probe-input` JSON contains device-node identities and capability ranges,
+not touch/Marker samples. Pressure remains `INCONCLUSIVE` until physical values
+and semantics are separately qualified; the Phase 1 renderer is fixed-width.
 
 ## 5. Record a stock-UI latency baseline
 
@@ -113,6 +145,14 @@ missing points, ghosting, per-letter flashing, palm behavior, CPU/temperature
 impression, and firmware shown in Settings. Optical latency comes from the
 video; do not substitute submission timestamps.
 
+Record battery capacity and the host start time before the stock and native
+runs:
+
+```sh
+date -u +%Y-%m-%dT%H:%M:%SZ
+ssh root@"$PPR_DEVICE" 'cat /sys/class/power_supply/max1726x_battery/capacity; cat /sys/class/power_supply/max1726x_battery/status'
+```
+
 ## 6. Launch QTFB fallback mode
 
 Open AppLoad and select **Paper Pro Reader Native Benchmark (QTFB)**. AppLoad
@@ -122,6 +162,8 @@ fallback script directly outside AppLoad is intentionally unsupported.
 On the visible benchmark, confirm the backend indicator reads `QTFB FALLBACK`.
 Write `testing native ink`, use the controls, then Exit. If launch fails, return
 to stock UI and collect the AppLoad/Xovi log without changing their versions.
+QTFB results append to `benchmark-qtfb.jsonl`; they never share the takeover
+evidence file.
 
 ## 7. Prepare and launch takeover mode
 
@@ -131,8 +173,12 @@ its upstream instructions require. Supply only the resulting open-source
 adapter and commit marker to this device:
 
 ```sh
+export PPR_QUILL_LIBRARY='ABSOLUTE_PATH_TO_USER_BUILT_LIBQUILL_SO'
+test -f "$PPR_QUILL_LIBRARY"
+shasum -a 256 "$PPR_QUILL_LIBRARY"
+readelf -Ws "$PPR_QUILL_LIBRARY" | grep -E 'quill_(init|width|height|stride|format|buffer|swap_mono_fast|swap_mono_quality|swap_color|swap_color_full|process_events)$'
 ssh root@"$PPR_DEVICE" 'mkdir -p /home/root/.local/lib/paper-pro-reader'
-scp <USER_BUILT_LIBQUILL_SO> root@"$PPR_DEVICE":/home/root/.local/lib/paper-pro-reader/libquill.so
+scp "$PPR_QUILL_LIBRARY" root@"$PPR_DEVICE":/home/root/.local/lib/paper-pro-reader/libquill.so
 ssh root@"$PPR_DEVICE" 'printf "%s\\n" 39262ee0bef69915e3ead3ac218d5973916f422a > /home/root/.local/lib/paper-pro-reader/quill.commit'
 ```
 
@@ -201,13 +247,29 @@ Record the output. It contains process metrics, not stroke content.
 
 ## 15. Intentionally terminate the process
 
-Do this only with the recovery SSH terminal still working:
+Run all three failure paths only with the persistent recovery SSH shell still
+working. First request the catchable signal path:
 
 ```sh
 ssh root@"$PPR_DEVICE" 'systemctl kill --signal=TERM paper-pro-reader-benchmark.service'
 ```
 
-Do not manually start Xochitl yet; the recovery paths must do it.
+After step 16 confirms restoration, relaunch takeover and test an uncatchable
+process failure:
+
+```sh
+ssh root@"$PPR_DEVICE" 'systemctl kill --kill-who=all --signal=KILL paper-pro-reader-benchmark.service'
+```
+
+After another successful restoration, relaunch and stop the native event loop
+so the 10-second systemd watchdog—not an application signal handler—must recover:
+
+```sh
+ssh root@"$PPR_DEVICE" 'pid=$(pidof paper-pro-reader-benchmark); test -n "$pid"; kill -STOP "$pid"'
+```
+
+Wait at least 15 seconds, then run step 16. Do not manually start Xochitl before
+checking the automatic path.
 
 ## 16. Confirm automatic Xochitl restoration
 
@@ -234,11 +296,31 @@ In stock UI, open a notebook, make one finger gesture, write one Marker line,
 erase it, and lock/unlock the device. Record any input, display, frontlight,
 suspend, or color issue. This is separate from merely seeing Xochitl active.
 
+During takeover, verify the wake lock rather than forcing an unsafe suspend:
+
+```sh
+ssh root@"$PPR_DEVICE" 'grep -F paper-pro-reader-native /sys/power/wake_lock'
+```
+
+In-takeover suspend/resume remains `INCONCLUSIVE` by design; Xochitl owns stock
+suspend after restoration. Record the ending UTC time, battery capacity/status,
+and device heat after a fixed-duration run:
+
+```sh
+date -u +%Y-%m-%dT%H:%M:%SZ
+ssh root@"$PPR_DEVICE" 'cat /sys/class/power_supply/max1726x_battery/capacity; cat /sys/class/power_supply/max1726x_battery/status'
+```
+
+Report elapsed minutes and capacity change. Do not claim precise power draw from
+coarse integer capacity; battery impact may remain `INCONCLUSIVE`.
+
 ## 19. Gather the privacy-safe report
 
 ```sh
-scp root@"$PPR_DEVICE":/home/root/.local/state/paper-pro-reader-native/benchmark.jsonl .
-grep -E 'marker_samples_received|dropped_sample_count|display_submissions|xochitl_restoration_succeeded' benchmark.jsonl
+scp root@"$PPR_DEVICE":/home/root/.local/state/paper-pro-reader-native/benchmark-qtfb.jsonl .
+scp root@"$PPR_DEVICE":/home/root/.local/state/paper-pro-reader-native/benchmark-takeover.jsonl .
+grep -E 'marker_samples_received|dropped_sample_count|display_submissions|xochitl_restoration_succeeded' benchmark-qtfb.jsonl benchmark-takeover.jsonl
+test -s paper-pro-native-compatibility.txt
 ```
 
 The report must not contain coordinates, stroke shapes, handwriting images,
@@ -275,6 +357,8 @@ Use only `PASS`, `FAIL`, or `INCONCLUSIVE` and attach the evidence identifier.
 | --- | --- | --- |
 | Archive checksum and AArch64 ELF |  |  |
 | No proprietary blob/book/credential in archive |  |  |
+| Installation without Xovi/AppLoad change |  |  |
+| Compatibility tuple and dependency hashes captured |  |  |
 | SSH recovery available |  |  |
 | Stock phrase/loops baseline |  |  |
 | QTFB fallback launch/exit |  |  |
@@ -290,12 +374,16 @@ Use only `PASS`, `FAIL`, or `INCONCLUSIVE` and attach the evidence identifier.
 | Ring dropped-sample count = 0 |  |  |
 | CPU/peak RSS |  |  |
 | SIGTERM automatic restoration |  |  |
+| SIGKILL automatic restoration |  |  |
+| Watchdog-hang automatic restoration |  |  |
 | Normal-exit automatic restoration |  |  |
 | Five-finger emergency restoration |  |  |
 | Stock UI input/display after restore |  |  |
 | Suspend/resume |  |  |
 | Battery/heat observation |  |  |
 | Firmware 3.27.3.0 compatibility |  |  |
+| Reports gathered and privacy checked |  |  |
+| Recoverable uninstall / prior environment retained |  |  |
 
 Do not begin EPUB migration until the physical results are reviewed and the
 display/input/recovery gate is explicitly accepted.

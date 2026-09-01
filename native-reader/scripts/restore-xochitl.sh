@@ -9,7 +9,7 @@ fi
 
 install_root=${PPR_INSTALL_ROOT:-/home/root/xovi/exthome/appload/paper-pro-reader-native}
 systemctl_bin=${PPR_SYSTEMCTL:-systemctl}
-report_path=${PPR_BENCHMARK_REPORT:-/home/root/.local/state/paper-pro-reader-native/benchmark.jsonl}
+report_path=${PPR_BENCHMARK_REPORT:-/home/root/.local/state/paper-pro-reader-native/benchmark-takeover.jsonl}
 state_file="$run_dir/session.state"
 wake_unlock=${PPR_WAKE_UNLOCK:-/sys/power/wake_unlock}
 restored=true

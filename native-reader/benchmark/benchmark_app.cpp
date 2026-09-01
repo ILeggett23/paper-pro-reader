@@ -81,6 +81,7 @@ int BenchmarkApp::run() {
 
     bool running = exit_code == 0;
     std::optional<Point> last_marker_point;
+    std::optional<Point> last_eraser_point;
     std::array<InputEvent, 256> events{};
 
     const auto requestInkRefresh = [&](Rect region, MonotonicNs input_time,
@@ -154,6 +155,7 @@ int BenchmarkApp::run() {
             case InteractionAction::BeginErase:
                 scheduler.beginInteractive();
                 ink_->beginEraser();
+                last_eraser_point = decision.point;
                 if (const auto dirty = ink_->eraseAt(decision.point, 20)) {
                     renderer.restoreInkRegion(*dirty, *ink_);
                     requestInkRefresh(dirty->padded(8, renderer.canvasBounds()),
@@ -161,19 +163,23 @@ int BenchmarkApp::run() {
                 }
                 break;
             case InteractionAction::ContinueErase:
-                if (const auto dirty = ink_->eraseAt(decision.point, 20)) {
+                if (const auto dirty = ink_->eraseSegment(
+                        last_eraser_point.value_or(decision.point), decision.point, 20)) {
                     renderer.restoreInkRegion(*dirty, *ink_);
                     requestInkRefresh(dirty->padded(8, renderer.canvasBounds()),
                         decision.received_at_ns, preparation_start);
                 }
+                last_eraser_point = decision.point;
                 break;
             case InteractionAction::EndErase:
-                if (const auto dirty = ink_->eraseAt(decision.point, 20)) {
+                if (const auto dirty = ink_->eraseSegment(
+                        last_eraser_point.value_or(decision.point), decision.point, 20)) {
                     renderer.restoreInkRegion(*dirty, *ink_);
                     requestInkRefresh(dirty->padded(8, renderer.canvasBounds()),
                         decision.received_at_ns, preparation_start);
                 }
                 (void)ink_->finishEraser();
+                last_eraser_point.reset();
                 scheduler.endInteractive(preparation_start);
                 break;
             case InteractionAction::SelectPen:
