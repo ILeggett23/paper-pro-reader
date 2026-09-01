@@ -57,6 +57,16 @@ void testCoordinateTransform() {
     EXPECT(test, (rotated.normalize(0, 0) == paperpro::Point{1619, 0}));
     EXPECT(test, (rotated.normalize(1000, 2000) == paperpro::Point{0, 2159}));
 
+    paperpro::CoordinateTransform upside_down({0, 1000}, {0, 2000}, 1620, 2160,
+        paperpro::Rotation::Degrees180);
+    EXPECT(test, (upside_down.normalize(0, 0) == paperpro::Point{1619, 2159}));
+    EXPECT(test, (upside_down.normalize(1000, 2000) == paperpro::Point{0, 0}));
+
+    paperpro::CoordinateTransform counter_clockwise({0, 1000}, {0, 2000}, 1620, 2160,
+        paperpro::Rotation::Degrees270);
+    EXPECT(test, (counter_clockwise.normalize(0, 0) == paperpro::Point{0, 2159}));
+    EXPECT(test, (counter_clockwise.normalize(1000, 2000) == paperpro::Point{1619, 0}));
+
     paperpro::CoordinateTransform invalid({0, 0}, {0, 10}, 10, 10);
     EXPECT(test, !invalid.normalize(0, 0));
 }
@@ -227,6 +237,53 @@ void testRefreshCoalescingAndOutstanding() {
     EXPECT(test, scheduler.adaptiveCadence() == 25);
 }
 
+void testCoalescingPreservesEveryInkSample() {
+    constexpr auto test = "coalescing_preserves_samples";
+    paperpro::InkModel model;
+    paperpro::FakeDisplayBackend display;
+    std::string error;
+    (void)display.initialize(error);
+    paperpro::LatencyRecorder recorder;
+    paperpro::RefreshScheduler scheduler(display, recorder,
+        paperpro::RefreshScheduler::Config{1, 100, 20, 50});
+
+    EXPECT(test, model.beginStroke(inkPoint(10, 100, 1)));
+    scheduler.beginInteractive();
+    for (int index = 1; index <= 100; ++index) {
+        const auto point = inkPoint(10 + index, 100 + index % 3,
+            static_cast<paperpro::MonotonicNs>(index + 1));
+        EXPECT(test, model.appendPoint(point).has_value());
+        scheduler.requestInteractive({10 + index - 1, 98, 2, 6},
+            point.received_at_ns, point.received_at_ns);
+    }
+    EXPECT(test, model.totalPoints() == 101);
+    EXPECT(test, display.submissions().empty());
+    EXPECT(test, scheduler.tick(102, error));
+    EXPECT(test, display.submissions().size() == 1);
+    EXPECT(test, model.totalPoints() == 101);
+    EXPECT(test, display.submissions().front().request.region.width >= 100);
+}
+
+void testMaximumPendingRegionAge() {
+    constexpr auto test = "maximum_pending_region_age";
+    paperpro::FakeDisplayBackend display;
+    std::string error;
+    (void)display.initialize(error);
+    paperpro::LatencyRecorder recorder;
+    paperpro::RefreshScheduler scheduler(display, recorder,
+        paperpro::RefreshScheduler::Config{1000, 1000, 20, 50});
+
+    scheduler.requestUi({1, 1, 4, 4}, paperpro::UpdateMode::Ui, 1);
+    EXPECT(test, scheduler.tick(1, error));
+    display.completeLast(2);
+    EXPECT(test, scheduler.tick(2, error));
+    scheduler.requestUi({20, 20, 4, 4}, paperpro::UpdateMode::Ui, 3);
+    EXPECT(test, scheduler.tick(22, error));
+    EXPECT(test, display.submissions().size() == 1);
+    EXPECT(test, scheduler.tick(23, error));
+    EXPECT(test, display.submissions().size() == 2);
+}
+
 void testIdleCleanupAndCancellation() {
     constexpr auto test = "idle_cleanup_and_cancel";
     paperpro::FakeDisplayBackend display;
@@ -323,6 +380,8 @@ int main() {
     testClearUndoGrouping();
     testDirtyBounds();
     testRefreshCoalescingAndOutstanding();
+    testCoalescingPreservesEveryInkSample();
+    testMaximumPendingRegionAge();
     testIdleCleanupAndCancellation();
     testNewStrokeCancelsWaitingCleanup();
     testSyntheticOverrun();
