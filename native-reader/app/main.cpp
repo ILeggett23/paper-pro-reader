@@ -129,6 +129,10 @@ int main(int argc, char** argv) {
     std::unique_ptr<paperpro::DisplayBackend> display;
     bool xochitl_managed_externally = false;
     if (backend == "takeover") {
+        if (environment("PPR_SUPERVISED_TAKEOVER") != "1") {
+            std::cerr << "Direct takeover requires the supervised launch-takeover.sh path\n";
+            return 2;
+        }
         display = std::make_unique<paperpro::QuillDisplayBackend>(
             paperpro::QuillDisplayBackend::Config{quill_library, quill_commit_file});
         xochitl_managed_externally = true;

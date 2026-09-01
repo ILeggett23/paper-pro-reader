@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -135,6 +136,7 @@ bool LatencyRecorder::writeReport(const std::string& path, std::string_view back
     std::ostringstream report;
     report << std::fixed << std::setprecision(3)
         << "{\"schema_version\":1,\"event\":\"benchmark_metrics\""
+        << ",\"recorded_at_unix\":" << static_cast<long long>(std::time(nullptr))
         << ",\"backend\":" << jsonString(backend)
         << ",\"marker_samples_received\":" << marker_received_.load()
         << ",\"marker_samples_consumed\":" << marker_consumed_.load()
@@ -163,8 +165,9 @@ bool LatencyRecorder::writeReport(const std::string& path, std::string_view back
         << ",\"cpu_time_ms\":" << static_cast<double>(cpu_microseconds) / 1000.0
         << ",\"peak_resident_memory_bytes\":" << peak_resident_bytes
         << ",\"shutdown_reason\":" << jsonString(shutdown_reason)
-        << ",\"xochitl_restoration_succeeded\":"
-        << (xochitl_managed_externally ? "null" : "true")
+        << ",\"xochitl_restoration_required\":"
+        << (xochitl_managed_externally ? "true" : "false")
+        << ",\"xochitl_restoration_succeeded\":null"
         << "}\n";
 
     // JSON Lines is append-only so QTFB/takeover reruns retain independent
@@ -192,6 +195,7 @@ bool LatencyRecorder::appendRestoration(const std::string& path,
         return false;
     }
     output << "{\"schema_version\":1,\"event\":\"lifecycle\","
+        << "\"recorded_at_unix\":" << static_cast<long long>(std::time(nullptr)) << ','
         << "\"xochitl_restoration_succeeded\":" << (succeeded ? "true" : "false")
         << "}\n";
     output.close();

@@ -47,7 +47,7 @@ Public future boundaries are declared in `core/interfaces.h`: `DisplayBackend`,
 
 ## Host build and tests
 
-Requirements: CMake 3.22+, Ninja, a C++20 compiler, and pthreads.
+Requirements: CMake 3.22+, Ninja, Python 3, a C++20 compiler, and pthreads.
 
 ```sh
 cd native-reader

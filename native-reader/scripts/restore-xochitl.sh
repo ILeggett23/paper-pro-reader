@@ -25,10 +25,6 @@ if [ "$context" != --stop-hook ]; then
         printf '%s\n' "benchmark service did not stop; refusing parallel xochitl" >&2
         exit 1
     fi
-    if "$systemctl_bin" is-active --quiet xochitl.service; then
-        printf '%s\n' "xochitl restoration: PASS"
-        exit 0
-    fi
 fi
 
 # Refuse to remove the vendor lock or start xochitl beside an unowned stray
@@ -79,11 +75,18 @@ if [ "$lock_acquired" != true ]; then
 fi
 trap 'rm -f "$lock_dir/owner.pid"; rmdir "$lock_dir" 2>/dev/null || true' EXIT
 
+xochitl_already_active=false
+if "$systemctl_bin" is-active --quiet xochitl.service; then
+    xochitl_already_active=true
+fi
+
 if [ -w "$wake_unlock" ]; then
     printf '%s\n' paper-pro-reader-native > "$wake_unlock" 2>/dev/null || true
 fi
 
-rm -f "${PPR_EPFRAMEBUFFER_LOCK:-/tmp/epframebuffer.lock}"
+if [ "$xochitl_already_active" != true ]; then
+    rm -f "${PPR_EPFRAMEBUFFER_LOCK:-/tmp/epframebuffer.lock}"
+fi
 
 xochitl_was_active=1
 if [ -r "$state_file" ]; then

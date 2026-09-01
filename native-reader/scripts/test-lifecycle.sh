@@ -38,6 +38,7 @@ PPR_BENCHMARK_REPORT="$fixture/state/report.jsonl" \
 [[ $(<"$apply_state") == active ]]
 
 # Restoration is deliberately idempotent.
+: > "$fixture/run/epframebuffer.lock"
 PPR_RUN_DIR="$fixture/run" \
 PPR_SYSTEMCTL="$fixture/bin/systemctl" \
 PPR_TEST_XOCHITL_STATE="$apply_state" \
@@ -48,6 +49,7 @@ PPR_INSTALL_ROOT="$fixture/missing-app" \
 PPR_BENCHMARK_REPORT="$fixture/state/report.jsonl" \
     "$root/scripts/restore-xochitl.sh"
 [[ $(<"$apply_state") == active ]]
+[[ -e "$fixture/run/epframebuffer.lock" ]]
 
 # Manual recovery first stops an active supervised benchmark; the fake stop
 # models ExecStopPost restoring xochitl before the manual caller returns.

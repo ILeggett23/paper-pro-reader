@@ -22,12 +22,12 @@ trap 'exit 143' TERM
 
 umask 077
 mkdir -p "$run_dir" "$(dirname "$report_path")"
-if "$systemctl_bin" is-active --quiet xochitl.service; then
-    printf 'xochitl_was_active=1\n' > "$state_file"
-    "$systemctl_bin" stop xochitl.service
-else
-    printf 'xochitl_was_active=0\n' > "$state_file"
+printf 'xochitl_was_active=1\n' > "$state_file"
+if ! "$systemctl_bin" is-active --quiet xochitl.service; then
+    printf '%s\n' "xochitl was not active at takeover time; restoring stock state" >&2
+    exit 19
 fi
+"$systemctl_bin" stop xochitl.service
 if "$systemctl_bin" is-active --quiet xochitl.service; then
     printf '%s\n' "xochitl did not stop; refusing display acquisition" >&2
     exit 20
@@ -42,6 +42,7 @@ fi
 
 vendor_library_dir=$(dirname "$vendor_library")
 export LD_LIBRARY_PATH="$vendor_library_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PPR_SUPERVISED_TAKEOVER=1
 
 "$install_root/bin/paper-pro-reader-benchmark" \
     --backend takeover \

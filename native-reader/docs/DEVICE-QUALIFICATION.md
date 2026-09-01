@@ -125,6 +125,12 @@ find /home/root/xovi /home/root/shims -maxdepth 5 -type f \
   -exec sha256sum {} \;
 /home/root/xovi/exthome/appload/paper-pro-reader-native/bin/paper-pro-reader-benchmark --probe-input
 ' | tee paper-pro-native-compatibility.txt
+
+ssh root@"$PPR_DEVICE" '
+find /home/root/xovi /home/root/shims -maxdepth 5 -type f \
+  \( -iname "*appload*" -o -name "qtfb-shim*.so" -o -iname "*resource*rebuilder*" \) \
+  -exec sha256sum {} \;
+' | LC_ALL=C sort > paper-pro-external-before.sha256
 ```
 
 The `--probe-input` JSON contains device-node identities and capability ranges,
@@ -180,13 +186,17 @@ readelf -Ws "$PPR_QUILL_LIBRARY" | grep -E 'quill_(init|width|height|stride|form
 ssh root@"$PPR_DEVICE" 'mkdir -p /home/root/.local/lib/paper-pro-reader'
 scp "$PPR_QUILL_LIBRARY" root@"$PPR_DEVICE":/home/root/.local/lib/paper-pro-reader/libquill.so
 ssh root@"$PPR_DEVICE" 'printf "%s\\n" 39262ee0bef69915e3ead3ac218d5973916f422a > /home/root/.local/lib/paper-pro-reader/quill.commit'
+export PPR_QUILL_SHA256=$(ssh root@"$PPR_DEVICE" 'sha256sum /home/root/.local/lib/paper-pro-reader/libquill.so' | awk '{print $1}')
+export PPR_VENDOR_LIBRARY_SHA256=$(ssh root@"$PPR_DEVICE" 'sha256sum /usr/lib/plugins/scenegraph/libqsgepaper.so' | awk '{print $1}')
+ssh root@"$PPR_DEVICE" 'readelf -n /home/root/.local/lib/paper-pro-reader/libquill.so /usr/lib/plugins/scenegraph/libqsgepaper.so 2>/dev/null | grep -E "File:|Build ID" || true' | tee -a paper-pro-native-compatibility.txt
+printf 'libquill_sha256=%s\nlibqsgepaper_sha256=%s\n' "$PPR_QUILL_SHA256" "$PPR_VENDOR_LIBRARY_SHA256" | tee -a paper-pro-native-compatibility.txt
 ```
 
 Do not upload `libqsgepaper.so`; the default path uses the copy already on the
 device. With the second SSH terminal still connected, launch:
 
 ```sh
-ssh root@"$PPR_DEVICE" '/home/root/xovi/exthome/appload/paper-pro-reader-native/scripts/launch-takeover.sh'
+ssh root@"$PPR_DEVICE" "PPR_QUILL_SHA256='$PPR_QUILL_SHA256' PPR_VENDOR_LIBRARY_SHA256='$PPR_VENDOR_LIBRARY_SHA256' /home/root/xovi/exthome/appload/paper-pro-reader-native/scripts/launch-takeover.sh"
 ```
 
 The screen must show `QUILL DIRECT`. If initialization fails, do not retry
@@ -215,6 +225,11 @@ touches must remain consumed.
 Draw five connected loops, five fast diagonals, and one slow edge-to-edge line.
 Record visible following latency, gaps, clipping, ring-overrun failure, panel
 artifacts, and whether presentation waits for pen lift.
+
+Also draw one line with deliberately light pressure and one with firm pressure
+at similar speed. Phase 1 intentionally renders fixed width, so equal visual
+width is expected. Record contact continuity and the advertised pressure range;
+pressure sensitivity/semantics remain `INCONCLUSIVE` rather than inferred.
 
 ## 11. Erase continuously
 
@@ -258,7 +273,7 @@ After step 16 confirms restoration, relaunch takeover and test an uncatchable
 process failure:
 
 ```sh
-ssh root@"$PPR_DEVICE" 'systemctl kill --kill-who=all --signal=KILL paper-pro-reader-benchmark.service'
+ssh root@"$PPR_DEVICE" 'systemctl kill --kill-whom=all --signal=KILL paper-pro-reader-benchmark.service'
 ```
 
 After another successful restoration, relaunch and stop the native event loop
@@ -321,6 +336,8 @@ scp root@"$PPR_DEVICE":/home/root/.local/state/paper-pro-reader-native/benchmark
 scp root@"$PPR_DEVICE":/home/root/.local/state/paper-pro-reader-native/benchmark-takeover.jsonl .
 grep -E 'marker_samples_received|dropped_sample_count|display_submissions|xochitl_restoration_succeeded' benchmark-qtfb.jsonl benchmark-takeover.jsonl
 test -s paper-pro-native-compatibility.txt
+if grep -E '"(x|y|coordinates|stroke|stroke_shape|selected_text|book_content|question|answer|credential|token|file_path)"[[:space:]]*:' benchmark-qtfb.jsonl benchmark-takeover.jsonl; then echo 'FORBIDDEN_REPORT_FIELD'; exit 1; fi
+if grep -E 'sk-[A-Za-z0-9_-]{20,}|Bearer[[:space:]]+[A-Za-z0-9_-]{24,}|OPENAI_API_KEY|DEVICE_ACCESS_TOKEN' benchmark-qtfb.jsonl benchmark-takeover.jsonl; then echo 'CREDENTIAL_LIKE_REPORT_CONTENT'; exit 1; fi
 ```
 
 The report must not contain coordinates, stroke shapes, handwriting images,
@@ -334,6 +351,12 @@ The uninstall is recoverable: it moves rather than deletes the candidate.
 ```sh
 ssh root@"$PPR_DEVICE" '/home/root/xovi/exthome/appload/paper-pro-reader-native/scripts/uninstall.sh'
 ssh root@"$PPR_DEVICE" 'systemctl is-active xochitl.service; ls -d /home/root/paper-pro-reader-native-uninstalled-* 2>/dev/null | tail -1'
+ssh root@"$PPR_DEVICE" '
+find /home/root/xovi /home/root/shims -maxdepth 5 -type f \
+  \( -iname "*appload*" -o -name "qtfb-shim*.so" -o -iname "*resource*rebuilder*" \) \
+  -exec sha256sum {} \;
+' | LC_ALL=C sort > paper-pro-external-after.sha256
+diff -u paper-pro-external-before.sha256 paper-pro-external-after.sha256
 ```
 
 If an earlier native benchmark directory was backed up in step 3, restore it

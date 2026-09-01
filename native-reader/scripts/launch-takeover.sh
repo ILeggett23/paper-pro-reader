@@ -76,6 +76,7 @@ command -v "$systemctl_bin" >/dev/null 2>&1 || fail "systemctl is unavailable"
 [ -r "$install_root/systemd/paper-pro-reader-benchmark.service" ] || fail "systemd benchmark unit is missing"
 [ -r "$install_root/systemd/paper-pro-reader-recovery.service" ] || fail "systemd recovery unit is missing"
 [ -w "$wake_lock" ] || fail "kernel wake lock is not writable"
+[ -w "$wake_unlock" ] || fail "kernel wake unlock is not writable"
 [ -r "$battery_capacity_file" ] || fail "battery capacity is unavailable"
 battery_capacity=$(tr -dc '0-9' < "$battery_capacity_file")
 battery_status=$(sed -n '1p' "$battery_status_file" 2>/dev/null || true)
@@ -87,6 +88,16 @@ if "$systemctl_bin" is-active --quiet paper-pro-reader-benchmark.service; then
     printf '%s\n' "Paper Pro Reader native benchmark is already running."
     exit 0
 fi
+
+for process_exe in /proc/[0-9]*/exe; do
+    [ -e "$process_exe" ] || continue
+    process_target=$(readlink "$process_exe" 2>/dev/null || true)
+    case "$process_target" in
+        */paper-pro-reader-benchmark|*/paper-pro-reader-benchmark\ \(deleted\))
+            fail "a benchmark process already exists outside the supervised unit"
+            ;;
+    esac
+done
 
 "$install_root/bin/paper-pro-reader-benchmark" --probe-input >/dev/null \
     || fail "Marker/touch capability discovery or ABS-range validation failed"
