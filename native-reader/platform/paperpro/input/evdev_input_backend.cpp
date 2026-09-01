@@ -343,8 +343,13 @@ struct EvdevInputBackend::Impl {
         }
         if (event.type == EV_ABS) {
             if (event.code == ABS_MT_SLOT) {
-                current_touch_slot = std::clamp(event.value, 0,
-                    static_cast<int>(touch_slots.size()) - 1);
+                if (event.value < 0
+                    || event.value >= static_cast<int>(touch_slots.size())) {
+                    healthy.store(false, std::memory_order_release);
+                    notify();
+                    return;
+                }
+                current_touch_slot = event.value;
                 return;
             }
             auto& slot = touch_slots[static_cast<std::size_t>(current_touch_slot)];

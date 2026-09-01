@@ -151,6 +151,14 @@ void testMarkerLiftOutsideCanvasIsClipped() {
         {100, 2050}, 3, 3, 0, 0, paperpro::Tool::Pen});
     EXPECT(test, up.action == paperpro::InteractionAction::EndStroke);
     EXPECT(test, up.point == last_canvas_point);
+
+    paperpro::InteractionController in_bounds({0, 72, 1620, 1908},
+        {0, 1980, 1620, 180});
+    (void)in_bounds.handle({paperpro::InputEventType::MarkerDown,
+        {100, 100}, 4, 4, 0, 100, paperpro::Tool::Pen});
+    const auto in_bounds_up = in_bounds.handle({paperpro::InputEventType::MarkerUp,
+        {120, 120}, 5, 5, 0, 0, paperpro::Tool::Pen});
+    EXPECT(test, (in_bounds_up.point == paperpro::Point{120, 120}));
 }
 
 void testInkAndContinuousEraser() {

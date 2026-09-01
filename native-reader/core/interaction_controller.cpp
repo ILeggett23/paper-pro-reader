@@ -91,7 +91,8 @@ InteractionDecision InteractionController::markerDecision(const InputEvent& even
         marker_control_contact_ = false;
         marker_has_canvas_point_ = false;
         if (was_control || !had_canvas_point) return decision;
-        decision.point = last_marker_canvas_point_;
+        decision.point = canvas_.contains(event.point)
+            ? event.point : last_marker_canvas_point_;
         decision.action = active_tool == Tool::Eraser
             ? InteractionAction::EndErase : InteractionAction::EndStroke;
     }
