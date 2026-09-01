@@ -91,7 +91,7 @@ Direct takeover is launched over SSH:
 /home/root/xovi/exthome/appload/paper-pro-reader-native/scripts/launch-takeover.sh
 ```
 
-It admits only `reMarkable Ferrari` on firmware family 3.27, verifies the
+It admits only `reMarkable Ferrari` on firmware `3.27.3.0`, verifies the
 pinned Quill commit marker and required Quill C symbols, confirms the device-
 local vendor library is readable, records prior state, stops Xochitl, holds a
 wake lock, and starts a transient systemd unit. Any initialization failure runs

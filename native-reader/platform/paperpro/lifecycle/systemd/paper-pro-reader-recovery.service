@@ -1,0 +1,7 @@
+[Unit]
+Description=Restore xochitl after Paper Pro Reader benchmark failure
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/run/paper-pro-reader-native/session.env
+ExecStart=/run/paper-pro-reader-native/restore-xochitl.sh

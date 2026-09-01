@@ -1,0 +1,21 @@
+[Unit]
+Description=Paper Pro Reader native display/input benchmark
+After=network.target
+OnFailure=paper-pro-reader-recovery.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+EnvironmentFile=/run/paper-pro-reader-native/session.env
+ExecStart=/run/paper-pro-reader-native/run-takeover-session.sh
+ExecStopPost=/run/paper-pro-reader-native/restore-xochitl.sh --stop-hook
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=10
+TimeoutStartSec=15
+WatchdogSec=10
+Restart=no
+OOMPolicy=stop
+
+[Install]
+WantedBy=multi-user.target

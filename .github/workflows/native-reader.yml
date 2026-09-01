@@ -1,0 +1,118 @@
+name: native-reader-foundation
+
+on:
+  push:
+    branches: [native-reader-v2-spike]
+  pull_request:
+    paths:
+      - "native-reader/**"
+      - ".github/workflows/native-reader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Configure and test C++20 core
+        working-directory: native-reader
+        run: |
+          cmake --preset host-debug
+          cmake --build --preset host-debug
+          ctest --preset host-debug --output-on-failure
+      - name: Test lifecycle and repository safety
+        run: |
+          native-reader/scripts/test-lifecycle.sh
+          native-reader/scripts/secret-and-content-scan.sh
+
+  sanitizers:
+    name: ASan and UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Sanitized host suite
+        working-directory: native-reader
+        run: |
+          cmake --preset host-sanitized
+          cmake --build --preset host-sanitized
+          ASAN_OPTIONS=detect_leaks=1:strict_string_checks=1 \
+          UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+            ctest --test-dir build/host-sanitized --output-on-failure
+
+  ferrari:
+    name: Official Ferrari SDK package
+    runs-on: ubuntu-24.04
+    needs: [host, sanitizers]
+    env:
+      SDK_URL: https://storage.googleapis.com/remarkable-codex-toolchain/3.27.0.97/ferrari/remarkable-production-image-5.7.119-ferrari-public-x86_64-toolchain.sh
+      SDK_SHA256: 324d77d84dda5ba8fac484107b3c9981daaa28fe5ebed6589172f0cb1bcdd020
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download and verify official Ferrari toolchain
+        run: |
+          set -euo pipefail
+          installer="$RUNNER_TEMP/ferrari-sdk-installer.sh"
+          curl --fail --location --retry 3 "$SDK_URL" --output "$installer"
+          printf '%s  %s\n' "$SDK_SHA256" "$installer" | sha256sum --check
+          chmod 700 "$installer"
+          "$installer" -y -d "$RUNNER_TEMP/ferrari-sdk"
+      - name: Cross-build with the official Ferrari SDK
+        run: |
+          set -euo pipefail
+          sdk_env=$(find "$RUNNER_TEMP/ferrari-sdk" -maxdepth 1 -type f -name 'environment-setup-*' -print -quit)
+          test -n "$sdk_env"
+          toolchain=$(find "$RUNNER_TEMP/ferrari-sdk" -type f -name OEToolchainConfig.cmake -print -quit)
+          test -r "$toolchain"
+          export PPR_FERRARI_SDK_ENV="$sdk_env"
+          export PPR_FERRARI_CMAKE_TOOLCHAIN_FILE="$toolchain"
+          native-reader/scripts/cross-build.sh
+      - name: Create and reproduce deterministic device package
+        id: package
+        run: |
+          set -euo pipefail
+          export PPR_ARTIFACT_DIR="$RUNNER_TEMP/package-one"
+          native-reader/scripts/package-device.sh
+          export PPR_ARTIFACT_DIR="$RUNNER_TEMP/package-two"
+          native-reader/scripts/package-device.sh
+          first=$(find "$RUNNER_TEMP/package-one" -name '*.tar' -print -quit)
+          second=$(find "$RUNNER_TEMP/package-two" -name '*.tar' -print -quit)
+          cmp "$first" "$second"
+          cp "$first" .
+          cp "$first.sha256" .
+          cp "$first.contents.txt" .
+          artifact=$(basename "$first")
+          printf 'artifact=%s\n' "$artifact" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$(awk '{print $1}' "$first.sha256")" >> "$GITHUB_OUTPUT"
+      - name: Verify package exclusions
+        run: |
+          set -euo pipefail
+          tar -tf "${{ steps.package.outputs.artifact }}" | tee /tmp/native-reader-contents.txt
+          ! grep -E '\.(so|epub|pdf|rmdoc|rm)$' /tmp/native-reader-contents.txt
+          ! grep -E 'libqsgepaper|libquill|OPENAI_API_KEY|DEVICE_ACCESS_TOKEN' /tmp/native-reader-contents.txt
+      - name: Upload deterministic Ferrari package
+        uses: actions/upload-artifact@v7
+        with:
+          name: paper-pro-reader-native-${{ github.sha }}
+          retention-days: 30
+          path: |
+            ${{ steps.package.outputs.artifact }}
+            ${{ steps.package.outputs.artifact }}.sha256
+            ${{ steps.package.outputs.artifact }}.contents.txt

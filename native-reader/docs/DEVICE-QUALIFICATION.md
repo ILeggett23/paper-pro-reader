@@ -1,7 +1,8 @@
 # Native benchmark device qualification
 
 This procedure is for the reMarkable Paper Pro (`reMarkable Ferrari`) running
-the tested 3.27 firmware family. It does not alter Xovi/AppLoad versions, the
+the physically referenced firmware `3.27.3.0`. Other 3.27 builds remain
+unsupported for direct takeover. It does not alter Xovi/AppLoad versions, the
 KOReader RC5 installation, books, settings, or the immutable OS partition.
 
 No physical row is PASS until a person runs this procedure on the device and
@@ -22,8 +23,8 @@ Set these values on the host. Replace only the three angle-bracket values:
 
 ```sh
 export PPR_DEVICE=<PAPER_PRO_IP>
-export PPR_ARCHIVE=<PAPER_PRO_NATIVE_TAR_XZ>
-export PPR_SHA_FILE=<PAPER_PRO_NATIVE_TAR_XZ_SHA256>
+export PPR_ARCHIVE=<PAPER_PRO_NATIVE_TAR>
+export PPR_SHA_FILE=<PAPER_PRO_NATIVE_TAR_SHA256>
 ```
 
 ## 1. Verify the archive checksum
@@ -45,7 +46,7 @@ They must match byte-for-byte.
 
 ```sh
 PPR_VERIFY_DIR=$(mktemp -d)
-tar -xJf "$PPR_ARCHIVE" -C "$PPR_VERIFY_DIR"
+tar -xf "$PPR_ARCHIVE" -C "$PPR_VERIFY_DIR"
 file "$PPR_VERIFY_DIR/paper-pro-reader-native/bin/paper-pro-reader-benchmark"
 find "$PPR_VERIFY_DIR/paper-pro-reader-native" -type f -name '*.so' -print
 find "$PPR_VERIFY_DIR/paper-pro-reader-native" -type f \( -name '*.epub' -o -name '*.pdf' -o -name '*.rmdoc' \) -print
@@ -75,7 +76,7 @@ install_root=/home/root/xovi/exthome/appload/paper-pro-reader-native
 stamp=$(date +%Y%m%d-%H%M%S)
 stage=/home/root/paper-pro-reader-native-stage-$stamp
 mkdir -p "$stage"
-tar -xJf "$archive" -C "$stage"
+tar -xf "$archive" -C "$stage"
 test -x "$stage/paper-pro-reader-native/bin/paper-pro-reader-benchmark"
 test -r "$stage/paper-pro-reader-native/external.manifest.json"
 if [ -e "$install_root" ]; then

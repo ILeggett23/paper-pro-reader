@@ -36,6 +36,9 @@ luacov.stats.out
 trace-out.txt
 koreader-*
 
+/native-reader/build/
+/native-reader/artifacts/
+
 i18n
 
 /.cproject

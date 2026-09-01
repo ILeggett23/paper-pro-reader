@@ -1,0 +1,8 @@
+{
+  "name": "Paper Pro Reader Native Benchmark (QTFB)",
+  "application": "scripts/launch-qtfb.sh",
+  "environment": {
+    "PPR_DISPLAY_BACKEND": "qtfb"
+  },
+  "qtfb": true
+}
